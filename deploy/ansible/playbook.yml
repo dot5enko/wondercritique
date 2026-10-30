@@ -1,0 +1,41 @@
+---
+# Deploys the wonder-critique API backend as a systemd service and an nginx
+# vhost ({{ backend_domain }}) proxying to it, on the local machine.
+#
+# Tags (surfaced on the Tags tab). Every commented ansible-playbook line
+# below doubles as that tag's description in the UI, via the comment
+# convention the tag-discovery feature parses (tag word, then description
+# after the second hash):
+#
+#   ansible-playbook playbook.yml --tags deploy    # Full deploy: build and run the backend, configure nginx
+#   ansible-playbook playbook.yml --tags backend   # Build, install and run the Go API as a systemd service
+#   ansible-playbook playbook.yml --tags nginx     # Install and validate the nginx vhost for the API
+#
+# Discovery rules this playbook follows:
+#   - every deployable play/task carries explicit literal tags (comma string
+#     or list; no templated tags like tags: "{{ var }}");
+#   - roles are tagged at the roles: level, not inside the role itself;
+#   - the secrets guard below is tagged `always` so it runs under any tag
+#     selection; discovery drops `always`/`never` from the tag list.
+
+- name: Deploy wonder-critique API (backend + nginx)
+  hosts: wonder-critique-api
+  become: true
+  tags: [deploy]
+
+  pre_tasks:
+    - name: Verify secrets are configured
+      ansible.builtin.assert:
+        that:
+          - vault_jwt_secret | length >= 32
+        fail_msg: >-
+          JWT_SECRET must be at least 32 bytes in prod.
+          Copy group_vars/all/vault.yml.example to vault.yml, fill the
+          values and encrypt with ansible-vault.
+      tags: [always]
+
+  roles:
+    - role: backend
+      tags: [backend]
+    - role: nginx
+      tags: [nginx]

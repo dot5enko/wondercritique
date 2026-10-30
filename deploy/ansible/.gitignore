@@ -1,0 +1,2 @@
+# Never commit decrypted secrets.
+group_vars/all/vault.yml

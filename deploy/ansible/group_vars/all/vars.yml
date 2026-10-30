@@ -1,0 +1,19 @@
+---
+# Public (non-secret) deployment variables.
+# Secrets live in group_vars/all/vault.yml which must NOT be committed.
+vault_jwt_secret: ""
+vault_resend_api_key: ""
+vault_mail_from: ""
+vault_model_api_key: ""
+
+# Virtual domain nginx serves for the API.
+backend_domain: wonder-critique-api.cldfn.com
+
+# TLS is terminated at Cloudflare in front of this machine; the origin nginx
+# serves plain HTTP on port 80 and must not listen on 443.
+
+# CORS origins allowed to call the API (rendered into CORS_ORIGINS env var,
+# comma separated). Add your frontend origins here, e.g.:
+#   backend_cors_origins:
+#     - https://wonder-critique.com
+backend_cors_origins: []

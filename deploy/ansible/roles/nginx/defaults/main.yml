@@ -1,0 +1,12 @@
+---
+nginx_conf_path: /etc/nginx/conf.d/wonder-critique-api.conf
+
+# Plain-HTTP vhost on 80 (TLS is terminated at Cloudflare above this origin).
+# Upstream address: the systemd service binds here.
+backend_upstream_host: 127.0.0.1
+backend_upstream_port: 8080
+
+# Requests/agent runs can stream for a while; keep generous but finite.
+nginx_proxy_read_timeout: 300s
+nginx_proxy_send_timeout: 300s
+nginx_client_max_body_size: 10m

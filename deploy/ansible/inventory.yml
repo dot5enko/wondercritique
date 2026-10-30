@@ -1,0 +1,7 @@
+# Destination is the local machine itself.
+all:
+  hosts:
+    wonder-critique-api:
+      ansible_host: localhost
+      ansible_connection: local
+      ansible_python_interpreter: auto

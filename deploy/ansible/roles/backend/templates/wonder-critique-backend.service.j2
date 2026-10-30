@@ -1,0 +1,52 @@
+# {{ ansible_managed }}
+[Unit]
+Description=wonder-critique API backend
+Documentation=file:///opt/wonder-critique/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User={{ backend_service_name }}
+Group={{ backend_service_name }}
+EnvironmentFile={{ backend_env_file }}
+ExecStart={{ backend_binary_path }}
+WorkingDirectory={{ backend_state_dir }}
+StateDirectory={{ backend_service_name }}
+StateDirectoryMode=0750
+
+# The app shuts down gracefully (SSE streams allowed to drain). Past the
+# deadline the runtime context is cancelled and connections are closed.
+TimeoutStopSec=10s
+TimeoutStartSec=30s
+Restart=on-failure
+RestartSec=2s
+
+# Hardening. The binary is static Go (CGO_ENABLED=0) binding to
+# {{ backend_http_addr }} only; it needs no capabilities and writes
+# solely to the StateDirectory.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
