@@ -1,0 +1,35 @@
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  BIN: bin/server
+
+tasks:
+  dev:
+    desc: Run the server from source (dev mode)
+    cmds:
+      - go run ./cmd/server
+
+  run:
+    desc: Build and run the binary
+    deps: [build]
+    cmds:
+      - ./{{.BIN}}
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./... {{.CLI_ARGS}}
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  build:
+    desc: Build a static binary
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -trimpath -ldflags "-s -w" -o {{.BIN}} ./cmd/server
