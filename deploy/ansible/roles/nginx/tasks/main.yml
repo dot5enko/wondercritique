@@ -28,7 +28,7 @@
   ansible.builtin.uri:
     url: "http://127.0.0.1/healthz"
     headers:
-      Host: "{{ backend_domain }}"
+      Host: "{{ vault_backend_domain }}"
     status_code: 200
     return_content: true
   register: nginx_probe

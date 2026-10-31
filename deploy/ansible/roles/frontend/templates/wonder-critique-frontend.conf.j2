@@ -1,0 +1,36 @@
+# {{ ansible_managed }}
+# wonder-critique frontend — {{ vault_frontend_domain }}
+#
+# Static vhost for the built SPA (Vite output). Plain HTTP only, same as the
+# API vhost: TLS is terminated at Cloudflare in front. Do NOT listen on 443.
+#
+# Unknown paths fall back to index.html so client-side routes resolve.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ vault_frontend_domain }};
+
+    root {{ frontend_install_dir }};
+    index index.html;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+    # index.html names the content-hashed bundles, so a deploy is picked up
+    # immediately only if the entry document is never cached.
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    # Vite emits content-hashed files here — safe to cache forever.
+    location {{ frontend_assets_path }} {
+        add_header Cache-Control "public, max-age={{ frontend_asset_max_age }}, immutable";
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}

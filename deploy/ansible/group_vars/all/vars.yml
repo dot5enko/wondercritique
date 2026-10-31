@@ -6,8 +6,9 @@ vault_resend_api_key: ""
 vault_mail_from: ""
 vault_model_api_key: ""
 
-# Virtual domain nginx serves for the API.
-backend_domain: wonder-critique-api.cldfn.com
+# Virtual domains nginx serves (values live in vault.yml).
+vault_backend_domain: ""
+vault_frontend_domain: ""
 
 # TLS is terminated at Cloudflare in front of this machine; the origin nginx
 # serves plain HTTP on port 80 and must not listen on 443.
@@ -15,5 +16,5 @@ backend_domain: wonder-critique-api.cldfn.com
 # CORS origins allowed to call the API (rendered into CORS_ORIGINS env var,
 # comma separated). Add your frontend origins here, e.g.:
 #   backend_cors_origins:
-#     - https://wonder-critique.com
+#     - https://wonder-critique.cldfn.com
 backend_cors_origins: []

@@ -1,5 +1,5 @@
 # {{ ansible_managed }}
-# wonder-critique API — {{ backend_domain }}
+# wonder-critique API — {{ vault_backend_domain }}
 #
 # Origin vhost: plain HTTP only. TLS is terminated at Cloudflare in front;
 # Cloudflare talks to this port over HTTP. Do NOT listen on 443 here.
@@ -15,7 +15,7 @@ upstream wonder_critique_backend {
 server {
     listen 80;
     listen [::]:80;
-    server_name {{ backend_domain }};
+    server_name {{ vault_backend_domain }};
 
     location / {
         proxy_pass http://wonder_critique_backend;

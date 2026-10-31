@@ -1,0 +1,7 @@
+---
+# Named differently from the nginx role's "Reload nginx" handler on purpose:
+# handler names are shared per play, a duplicate would shadow the other one.
+- name: Reload nginx for frontend
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded

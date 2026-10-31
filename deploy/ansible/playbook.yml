@@ -1,6 +1,7 @@
 ---
-# Deploys the wonder-critique API backend as a systemd service and an nginx
-# vhost ({{ backend_domain }}) proxying to it, on the local machine.
+# Deploys the wonder-critique stack on the local machine: the API backend as a
+# systemd service, the web frontend as static files, and nginx vhosts
+# ({{ vault_backend_domain }}, {{ vault_frontend_domain }}) in front of both.
 #
 # Tags (surfaced on the Tags tab). Every commented ansible-playbook line
 # below doubles as that tag's description in the UI, via the comment
@@ -9,6 +10,7 @@
 #
 #   ansible-playbook playbook.yml --tags deploy    # Full deploy: build and run the backend, configure nginx
 #   ansible-playbook playbook.yml --tags backend   # Build, install and run the Go API as a systemd service
+#   ansible-playbook playbook.yml --tags frontend  # Build the web frontend and install its nginx vhost
 #   ansible-playbook playbook.yml --tags nginx     # Install and validate the nginx vhost for the API
 #
 # Discovery rules this playbook follows:
@@ -18,7 +20,7 @@
 #   - the secrets guard below is tagged `always` so it runs under any tag
 #     selection; discovery drops `always`/`never` from the tag list.
 
-- name: Deploy wonder-critique API (backend + nginx)
+- name: Deploy wonder-critique (backend + frontend + nginx)
   hosts: wonder-critique-api
   become: true
   tags: [deploy]
@@ -34,8 +36,21 @@
           values and encrypt with ansible-vault.
       tags: [always]
 
+    - name: Verify vhost domains are configured
+      ansible.builtin.assert:
+        that:
+          - vault_backend_domain | length > 0
+          - vault_frontend_domain | length > 0
+        fail_msg: >-
+          vault_backend_domain / vault_frontend_domain are empty.
+          Set them in group_vars/all/vault.yml (see vault.yml.example)
+          and encrypt with ansible-vault.
+      tags: [always]
+
   roles:
     - role: backend
       tags: [backend]
+    - role: frontend
+      tags: [frontend]
     - role: nginx
       tags: [nginx]

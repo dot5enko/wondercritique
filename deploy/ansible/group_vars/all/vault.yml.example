@@ -6,3 +6,7 @@ vault_jwt_secret: "REPLACE_ME_WITH_64_BYTES_OF_ENTROPY................"
 vault_resend_api_key: "re_..."
 vault_mail_from: "Wonder Critique <no-reply@cldfn.com>"
 vault_model_api_key: ""
+
+# Virtual domains nginx serves (proxied through Cloudflare, plain HTTP here).
+vault_backend_domain: "wonder-critique-api.cldfn.com"
+vault_frontend_domain: "wonder-critique.cldfn.com"

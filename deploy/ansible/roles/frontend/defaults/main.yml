@@ -1,0 +1,17 @@
+---
+# Defaults for the frontend (static Vite SPA) deployment.
+# There is no systemd service: nginx serves the built files straight from disk.
+
+# Built assets are installed here; this is also the nginx docroot.
+frontend_install_dir: /opt/wonder-critique/frontend
+
+# nginx vhost for the SPA ({{ vault_frontend_domain }} comes from vault.yml).
+frontend_nginx_conf_path: /etc/nginx/conf.d/wonder-critique-frontend.conf
+
+# Vite puts content-hashed bundles under /assets/, safe to cache forever;
+# index.html stays uncached so a deploy is visible immediately.
+frontend_assets_path: /assets/
+frontend_asset_max_age: 31536000
+
+# Source tree to build. Default = sibling of this deploy directory.
+frontend_source_dir: "{{ playbook_dir }}/../../apps/frontend"
