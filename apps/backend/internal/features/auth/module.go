@@ -7,10 +7,10 @@ import (
 
 	"go.uber.org/fx"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/features/auth/mailer"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/models"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/dbx"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/httpx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/auth/mailer"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 )
 
 // Module provides *Service, *Tokens, *Middleware, mailer.Mailer, the email-code provider and the /auth routes.

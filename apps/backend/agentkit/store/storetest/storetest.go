@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
 )
 
 // Run executes the conformance suite. newStore must return a fresh, empty store for each call.

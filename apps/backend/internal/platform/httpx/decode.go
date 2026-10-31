@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/apperr"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
 )
 
 // MaxBodyBytes is the request body limit applied by Decode.

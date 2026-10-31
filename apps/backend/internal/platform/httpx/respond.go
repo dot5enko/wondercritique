@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"gorm.io/gorm"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/apperr"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
 )
 
 // HandlerFunc is an HTTP handler that returns an error for central rendering.

@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/apperr"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
 )
 
 // RequestTimeout is the per-request deadline for non-streaming requests.

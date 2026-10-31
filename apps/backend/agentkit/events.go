@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
 )
 
 // EventType identifies an Event.

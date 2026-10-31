@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/apperr"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/httpx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 )
 
 // Controller serves /api/v1/auth.

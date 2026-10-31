@@ -14,9 +14,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/apperr"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/dbx"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/httpx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 )
 
 // Service implements the CRUD operations for model T without any HTTP concerns.

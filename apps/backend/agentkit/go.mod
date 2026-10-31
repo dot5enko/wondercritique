@@ -1,4 +1,4 @@
-module github.com/dot5enko/wonder-critique/apps/backend/agentkit
+module github.com/dot5enko/wondercritique/apps/backend/agentkit
 
 go 1.27.2
 

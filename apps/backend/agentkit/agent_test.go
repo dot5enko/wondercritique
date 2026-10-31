@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm/fake"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/tool"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm/fake"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/tool"
 )
 
 type numIn struct {

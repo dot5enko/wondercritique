@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/config"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/config"
 )
 
 // Module provides *gorm.DB and auto-migrates every model registered with AsModel.

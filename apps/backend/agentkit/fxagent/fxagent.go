@@ -5,9 +5,9 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store/sqlite"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store/sqlite"
 	"go.uber.org/fx"
 )
 

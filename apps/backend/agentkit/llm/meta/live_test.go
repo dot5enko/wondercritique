@@ -10,10 +10,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm/meta"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store/memory"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/tool"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm/meta"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store/memory"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/tool"
 )
 
 func TestLive(t *testing.T) {

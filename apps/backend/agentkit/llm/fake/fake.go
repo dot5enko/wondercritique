@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
 )
 
 // ErrNoTurns is returned when the provider is called with an empty script.

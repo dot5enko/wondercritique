@@ -11,7 +11,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
 )
 
 // errStopped is returned by consume when the consumer stopped the stream; it is not an error.

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm/meta"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm/meta"
 )
 
 type frame string

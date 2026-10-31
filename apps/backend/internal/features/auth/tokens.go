@@ -13,8 +13,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/config"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/models"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/config"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
 )
 
 const (

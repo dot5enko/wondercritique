@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
 )
 
 // Options configures the handler. SessionOwner, when set, scopes every session

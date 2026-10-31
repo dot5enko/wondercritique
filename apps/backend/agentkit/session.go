@@ -3,8 +3,8 @@ package agentkit
 import (
 	"context"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
 )
 
 // SessionOptions configures NewSession.

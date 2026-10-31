@@ -95,7 +95,7 @@ apply to 429/5xx before the first stream byte, honouring `Retry-After`. A live s
 ### SQLite (`store/sqlite`)
 
 ```go
-import sqlitestore "github.com/dot5enko/wonder-critique/apps/backend/agentkit/store/sqlite"
+import sqlitestore "github.com/dot5enko/wondercritique/apps/backend/agentkit/store/sqlite"
 
 s, err := sqlitestore.New(sqlDB) // any SQLite database/sql driver; tables prefixed agent_
 s, err := sqlitestore.New(sqlDB, sqlitestore.WithTablePrefix("custom_"))

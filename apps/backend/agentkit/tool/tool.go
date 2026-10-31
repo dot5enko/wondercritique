@@ -11,7 +11,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
 )
 
 // Tool is a function the model can call.

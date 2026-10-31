@@ -9,7 +9,7 @@ import (
 
 	"github.com/resend/resend-go/v2"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/config"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/config"
 )
 
 // Email is a single outgoing message.

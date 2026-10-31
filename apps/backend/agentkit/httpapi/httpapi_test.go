@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/httpapi"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm/fake"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
-	memory "github.com/dot5enko/wonder-critique/apps/backend/agentkit/store/memory"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/httpapi"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm/fake"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
+	memory "github.com/dot5enko/wondercritique/apps/backend/agentkit/store/memory"
 )
 
 func newAgent(t *testing.T, turns ...fake.Turn) (*agentkit.Agent, *fake.Provider) {

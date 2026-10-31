@@ -4,8 +4,8 @@ import (
 	"context"
 	"slices"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
 )
 
 // ContextPolicy decides which history is sent to the model on each step. It must not mutate history.

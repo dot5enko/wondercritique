@@ -17,11 +17,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/crud"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/models"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/apperr"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/dbx"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/httpx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/crud"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 )
 
 type note struct {

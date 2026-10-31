@@ -12,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/fx"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/config"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/config"
 )
 
 // NewServer creates the HTTP server bound to the fx lifecycle. Listening happens in OnStart (bind errors fail

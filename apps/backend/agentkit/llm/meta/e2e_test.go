@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm/meta"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store/memory"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/tool"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm/meta"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store/memory"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/tool"
 )
 
 // TestAgentLoop exercises the full agentkit run loop through the meta adapter.

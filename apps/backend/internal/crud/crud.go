@@ -15,7 +15,7 @@ import (
 	"go.uber.org/fx"
 	"gorm.io/gorm"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/httpx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 )
 
 // Module provides *crud.Registry.

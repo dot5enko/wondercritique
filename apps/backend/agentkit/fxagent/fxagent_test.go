@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/fxagent"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm/fake"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/fxagent"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm/fake"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxtest"
 

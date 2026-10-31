@@ -3,7 +3,7 @@ package auth
 import (
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/models"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
 )
 
 // UserIdentity links a user to a provider identity (table "identities"). It is named UserIdentity to keep

@@ -3,7 +3,7 @@ package main
 import (
 	"go.uber.org/fx"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/app"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/app"
 )
 
 func main() {

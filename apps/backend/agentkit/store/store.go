@@ -10,7 +10,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
 )
 
 // ErrNotFound is returned when a session or run does not exist.

@@ -1,4 +1,4 @@
-module github.com/dot5enko/wonder-critique/apps/backend
+module github.com/dot5enko/wondercritique/apps/backend
 
 go 1.27.2
 

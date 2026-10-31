@@ -6,11 +6,11 @@ package messages
 import (
 	"context"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/crud"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/features/auth"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/models"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/dbx"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/httpx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/crud"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/auth"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/fx"
 	"gorm.io/gorm"

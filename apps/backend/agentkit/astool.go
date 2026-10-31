@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/tool"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/tool"
 )
 
 type subAgentInput struct {

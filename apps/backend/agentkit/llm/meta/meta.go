@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
 )
 
 // Models served by the Responses API. Contributor variants let Meta train on request content.

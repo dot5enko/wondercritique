@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store/sqlite"
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/store/storetest"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store/sqlite"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/store/storetest"
 
 	_ "modernc.org/sqlite"
 )

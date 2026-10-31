@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/cors"
 	"go.uber.org/fx"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/config"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/apperr"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/config"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
 )
 
 // APIPrefix is where controllers registered with AsController are mounted.

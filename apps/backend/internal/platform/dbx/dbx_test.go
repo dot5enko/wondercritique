@@ -9,8 +9,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/models"
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/platform/dbx"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
 )
 
 type item struct {

@@ -8,7 +8,7 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/internal/config"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/config"
 )
 
 // Module provides *slog.Logger and routes fx's own events to it at debug level.

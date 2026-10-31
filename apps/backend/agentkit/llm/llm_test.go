@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dot5enko/wonder-critique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
 )
 
 func TestMessageHelpers(t *testing.T) {
