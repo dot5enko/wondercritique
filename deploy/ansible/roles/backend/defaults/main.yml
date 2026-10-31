@@ -15,7 +15,7 @@ backend_env_mode: "0640"
 
 backend_app_env: prod
 backend_log_level: info
-backend_port: 8080
+backend_port: 11111
 backend_http_addr: "127.0.0.1:{{ backend_port }}"
 backend_db_path: "{{ backend_state_dir }}/app.db"
 backend_jwt_issuer: wonder-critique

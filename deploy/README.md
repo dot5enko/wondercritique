@@ -94,7 +94,7 @@ The playbook:
    user, sqlite state in `/var/lib/wonder-critique`, bind only 127.0.0.1);
 3. installs the nginx vhost to `/etc/nginx/conf.d/wonder-critique-api.conf`
    and validates with `nginx -t` before reloading;
-4. verifies `http://127.0.0.1:8080/readyz` and the proxied vhost.
+4. verifies `http://127.0.0.1:11111/readyz` and the proxied vhost.
 
 ## 4. TLS
 
