@@ -12,7 +12,7 @@ Group={{ backend_service_name }}
 EnvironmentFile={{ backend_env_file }}
 ExecStart={{ backend_binary_path }}
 WorkingDirectory={{ backend_state_dir }}
-StateDirectory={{ backend_service_name }}
+StateDirectory={{ backend_state_dir | basename }}
 StateDirectoryMode=0750
 
 # The app shuts down gracefully (SSE streams allowed to drain). Past the
