@@ -126,12 +126,48 @@
             owner: root
             group: root
             mode: "0644"
+          register: backend_chrome_key
+
+        - name: Check dearmored Google Chrome key
+          ansible.builtin.stat:
+            path: /etc/apt/keyrings/google-chrome.gpg
+          register: backend_chrome_gpg
 
         - name: Dearmor the Google Chrome signing key
           ansible.builtin.command:
             cmd: gpg --dearmor --yes -o /etc/apt/keyrings/google-chrome.gpg /etc/apt/keyrings/google-chrome.pub
+          when: backend_chrome_key.changed or not backend_chrome_gpg.stat.exists
+          changed_when: true
+
+        - name: Remove legacy Google Chrome keyring
+          ansible.builtin.file:
+            path: /etc/apt/keyrings/google-chrome.asc
+            state: absent
+
+        - name: Locate conflicting Google Chrome apt sources
+          # A previous install (google-chrome-stable .deb or an older role
+          # revision using google-chrome.asc) leaves a second file with the
+          # same URI but a different Signed-By, and apt refuses to read the
+          # sources at all:
+          # "Conflicting values set for option Signed-By ... stable:
+          #  /etc/apt/keyrings/google-chrome.gpg != .../google-chrome.asc".
+          ansible.builtin.shell:
+            cmd: >-
+              grep -rl "dl.google.com/linux/chrome/deb"
+              /etc/apt/sources.list /etc/apt/sources.list.d
+              2>/dev/null || true
           args:
-            creates: /etc/apt/keyrings/google-chrome.gpg
+            executable: /bin/bash
+          register: backend_chrome_conflicts
+          changed_when: false
+          failed_when: false
+
+        - name: Remove conflicting Google Chrome apt sources
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ backend_chrome_conflicts.stdout_lines | default([]) }}"
+          when: item != "/etc/apt/sources.list.d/google-chrome.list" and item != ""
 
         - name: Add Google Chrome apt source
           ansible.builtin.copy:

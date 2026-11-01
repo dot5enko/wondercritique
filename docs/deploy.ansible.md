@@ -1,6 +1,6 @@
 # Deploy — Ansible
 
-State as of 2026-11-01. Location: `deploy/ansible/`. Owned by a separate deploy
+State as of 2026-11-02. Location: `deploy/ansible/`. Owned by a separate deploy
 tool; app work only authors the files, playbooks are never run from app work.
 
 ## Layout
@@ -37,7 +37,15 @@ deploy/ansible/
     key dearmored into `/etc/apt/keyrings/`, amd64 asserted; the Ubuntu
     `chromium` package is snap-only and cannot run under systemd), **Debian**
     gets the distro `chromium` deb; any other distro logs a warning and you
-    must set `backend_render_chrome_path` yourself
+    must set `backend_render_chrome_path` yourself. The role is the single
+    owner of the Chrome source: it removes the legacy
+    `/etc/apt/keyrings/google-chrome.asc` keyring and deletes any other
+    `sources.list[.d]` entry for `dl.google.com/linux/chrome/deb` before
+    writing `/etc/apt/sources.list.d/google-chrome.list`
+    (`signed-by=/etc/apt/keyrings/google-chrome.gpg`), so a stale `.deb`
+    install or older role revision cannot leave apt with `Conflicting values
+    set for option Signed-By` (fixed 2026-11-02); the dearmor step re-runs
+    when the upstream key changes or the `.gpg` is missing
   - fonts: `fonts-noto-core`, `fonts-noto-color-emoji`, `fonts-liberation`,
     `fonts-dejavu-core` (plus `ca-certificates`, `gnupg` for the Chrome repo)
   - `{{ backend_state_dir }}/tmp` is created owned by the service user; the
