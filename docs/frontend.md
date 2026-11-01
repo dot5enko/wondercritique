@@ -4,9 +4,11 @@ State as of 2026-10-31.
 
 ## Location & stack
 
-`apps/frontend` — bare Vite + TypeScript + React scaffold, nothing else (no router, no state
-management, no CSS framework, no linter). Created from the official `create-vite` react-ts
-template (create-vite 9.3.3), trimmed down to essentials.
+`apps/frontend` — Vite + TypeScript + React (no router, no state management, no linter).
+Created from the official `create-vite` react-ts template (create-vite 9.3.3).
+Tailwind v4 design system in `src/ui/` — see `docs/frontend.design-system.md` (2026-11-01).
+Extra deps: `tailwindcss` + `@tailwindcss/vite` (dev), `lucide-react` (icons),
+`@fontsource-variable/inter`, `@fontsource-variable/jetbrains-mono`.
 
 - Vite 8 (`vite` ^8.3.5), React 19 (`react` ^19.3.1), TypeScript ~7.0.2, `@vitejs/plugin-react` ^6.1.2
 - npm for package management; `package-lock.json` committed
@@ -19,9 +21,10 @@ Standard create-vite structure:
 | Path | Purpose |
 |---|---|
 | `index.html` | entry HTML, mounts `#root`, loads `/src/main.tsx` |
-| `src/main.tsx` | `createRoot` + `StrictMode`, imports `./index.css` |
-| `src/App.tsx` | root component (currently just an `<h1>`) |
-| `src/index.css` | minimal global styles |
+| `src/main.tsx` | `createRoot` + `StrictMode`, imports fonts + `./ui/styles.css` |
+| `src/App.tsx` | shell: sidebar + showcase canvas + composer (see design-system doc) |
+| `src/showcase.tsx` | design-system showcase panels (nav targets of the sidebar) |
+| `src/ui/` | design system (Tailwind entry `styles.css` + components) |
 | `vite.config.ts` | react plugin only, no proxy/server config yet |
 | `tsconfig.json` | project references → `tsconfig.app.json` (app code, `src/`) + `tsconfig.node.json` (`vite.config.ts`) |
 
@@ -33,7 +36,8 @@ Standard create-vite structure:
 | `npm run build` | `tsc -b` type-check, then production build to `dist/` |
 | `npm run preview` | serve the production build |
 
-Verified working 2026-10-31: `npm install` clean, `npm run build` passes (type-check + build).
+Verified working 2026-11-01: `npm install` clean, `npm run build` passes (type-check + build),
+showcase visually checked via Playwright screenshots (tmp/ds-*.png).
 
 ## Deployment (2026-10-31)
 

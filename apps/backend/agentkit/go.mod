@@ -4,6 +4,7 @@ go 1.27.2
 
 require (
 	github.com/invopop/jsonschema v0.14.0
+	go.uber.org/fx v1.24.0
 	modernc.org/sqlite v1.61.0
 )
 
@@ -17,7 +18,6 @@ require (
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	go.uber.org/dig v1.19.0 // indirect
-	go.uber.org/fx v1.24.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
