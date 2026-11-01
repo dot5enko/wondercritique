@@ -80,7 +80,13 @@ func (c *Controller) Routes(r chi.Router) {
 		if c.cfg.ModelAPIKey == "" {
 			r.Use(unconfigured)
 		}
-		r.Mount("/", httpapi.New(c.agent, httpapi.Options{
+		// httpapi returns a Go 1.22 ServeMux whose patterns are relative to the
+		// mount point ("GET /sessions", …). chi's Mount only updates its internal
+		// RoutePath — r.URL.Path still holds the full original path when the
+		// handler is a plain http.Handler, so the mux would match nothing and
+		// answer its own plain-text 404. Rewrite the path to the chi route tail
+		// before serving.
+		api := httpapi.New(c.agent, httpapi.Options{
 			SessionOwner: func(req *http.Request) (string, error) {
 				id := auth.UserID(req.Context())
 				if id == "" {
@@ -89,6 +95,13 @@ func (c *Controller) Routes(r chi.Router) {
 				return id, nil
 			},
 			Logger: c.log,
+		})
+		r.Mount("/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if rctx := chi.RouteContext(req.Context()); rctx != nil && rctx.RoutePath != "" {
+				req.URL.RawPath = ""
+				req.URL.Path = rctx.RoutePath
+			}
+			api.ServeHTTP(w, req)
 		}))
 	})
 }

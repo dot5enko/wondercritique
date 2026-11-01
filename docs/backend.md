@@ -218,6 +218,13 @@ the Meta Model API, mounted from `agentkit/httpapi` behind `auth.Required`. Sess
 user (`metadata.owner`, derived from the access token; other users' sessions 404). Without `MODEL_API_KEY` the routes
 answer 503 `unavailable` instead of failing at startup.
 
+Mounting gotcha (fixed 2026-11-02): `httpapi.New` returns a Go 1.22 `*http.ServeMux` with mount-relative patterns
+(`GET /sessions`, …), but chi's `Mount` does not rewrite `r.URL.Path` for plain `http.Handler`s — the mux saw the
+full original path and answered its own plain-text `404 page not found` for every authenticated request (anonymous
+ones got 401 from the auth middleware first, masking the routing bug). `Controller.Routes` now wraps the handler and
+rewrites `req.URL.Path` to `chi.RouteContext(req.Context()).RoutePath` before serving. Note this also makes the root
+request logger print the rewritten path (the handler mutates the request in place before the logger reads it).
+
 ## agentkit (separate module)
 
 `agentkit` is an embeddable agent SDK with its own `go.mod` (joined by the root `go.work`); it has no fx or chi
@@ -236,6 +243,29 @@ dependency in its core. See `agentkit/README.md` for the embedding API.
   sharing the app's SQLite file (tables prefixed `agent_`).
 - `agentkit/httpapi` — HTTP API over an agent: session CRUD and runs streamed as SSE.
 - `agentkit/fxagent` — fx wiring (`fxagent.Provide("critic", ctor)`, `fxagent.SQLiteStore()`).
+- `agentkit/vfs` + `agentkit/tools/fstools` — virtual file system and file tools (see `docs/backend.vfs.md`).
+- `agentkit/sandbox/jsrun` — JS sandbox (QuickJS-NG wasm on wazero) and the `run_js` tool; not wired into any
+  agent yet (see `docs/backend.sandbox.md`).
+
+### agentkit internals relevant for extending it (researched 2026-11-01)
+
+- `Config` (Model, System, Tools, MaxSteps, ReasoningEffort, Extra, Hooks…) is fixed per `*Agent`. `agentkit.New`
+  only validates, applies defaults and allocates the busy-session map, so building an agent per run/step is cheap.
+  The busy-session (`ErrSessionBusy`) tracking is per `*Agent` instance.
+- `tool.Tool.Call` returns `(string, error)`: **tools cannot return images or blocks**. `tool.New[In,Out]` decodes
+  input strictly (unknown fields rejected) and JSON-encodes non-string `Out`.
+- `llm.Block` kinds: `text`, `image` (`ImageURL`: `data:` URL or https), `tool_call`, `tool_result` (`Output`
+  string), `reasoning` (opaque provider payload).
+- Meta wire (`llm/meta/wire.go`): image blocks in messages → `input_image`; tool results → `function_call_output`
+  with a string output only.
+- Run loop (`run.go`): each step builds `llm.Request` from `Config` + `ContextPolicy` history, calls
+  `Hooks.BeforeRequest` (may rewrite the whole request, e.g. messages), streams, persists. A run ends **only when the
+  model answers without tool calls** (or `ErrMaxSteps`/cancel). There are no "terminal" tools or structured-output
+  helpers; `Config.Extra` is passed through to the provider request.
+- `Hooks.BeforeToolCall` can veto (error → error tool result) or rewrite `call.Input`.
+- Present but not wired into the critic agent yet (2026-11-01): virtual FS + file tools
+  (`docs/backend.vfs.md`), JS sandbox `run_js` (`docs/backend.sandbox.md`), HTML render service
+  (`docs/backend.render.md`). The critic agent has no tools.
 
 ### Agent HTTP endpoints (mounted at `/api/v1/agents/critic`)
 
@@ -249,4 +279,6 @@ dependency in its core. See `agentkit/README.md` for the embedding API.
 | POST | `/sessions/{id}/cancel` | 204; cancels the active run |
 
 A busy session answers 409. The run loop persists every message and tool call; a run interrupted by a process
-crash is marked `interrupted` on next start.
+crash is marked `interrupted` on next start. Empty collections always serialize as JSON arrays (`{"sessions":[]}`,
+`{"messages":[]}`), never `null` (fixed 2026-11-02 in the httpapi handlers — nil Go slices encode as `null`, which
+crashed the chat page's `.map`); tests assert the raw JSON.

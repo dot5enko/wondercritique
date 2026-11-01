@@ -29,3 +29,15 @@ backend_build_env:
 
 # Build flags (mirror of apps/backend Taskfile).
 backend_build_flags: -trimpath -ldflags "-s -w"
+
+# --- render (headless Chrome screenshots; see docs/backend.render.md) ---
+# Browser executable for the renderer; empty = renderer auto-detects
+# (PATH, well-known locations, Playwright caches).
+backend_render_chrome_path: ""
+# Parallel renders per process and hard deadline per render.
+backend_render_concurrency: 2
+backend_render_timeout: "20s"
+# Extra hosts fragments may load from (Google Fonts hosts always allowed).
+backend_render_allowed_hosts: []
+# Never true in production: Chrome keeps its sandbox.
+backend_render_chrome_no_sandbox: false

@@ -9,7 +9,7 @@
 # after the second hash):
 #
 #   ansible-playbook playbook.yml --tags deploy    # Full deploy: build and run the backend, configure nginx
-#   ansible-playbook playbook.yml --tags backend   # Build, install and run the Go API as a systemd service
+#   ansible-playbook playbook.yml --tags backend   # Build, install and run the Go API with its headless Chrome renderer as a systemd service
 #   ansible-playbook playbook.yml --tags frontend  # Build the web frontend and install its nginx vhost
 #   ansible-playbook playbook.yml --tags nginx     # Install and validate the nginx vhost for the API
 #

@@ -3,7 +3,9 @@ module github.com/dot5enko/wondercritique/apps/backend/agentkit
 go 1.27.2
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/invopop/jsonschema v0.14.0
+	github.com/tetratelabs/wazero v1.9.0
 	go.uber.org/fx v1.24.0
 	modernc.org/sqlite v1.61.0
 )

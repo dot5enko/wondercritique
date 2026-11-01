@@ -8,3 +8,9 @@
     name: "{{ backend_service_name }}"
     state: restarted
     daemon_reload: true
+
+- name: Apply render sysctl
+  # Only written when the kernel exposes the AppArmor userns restriction, so
+  # the key always exists here.
+  ansible.builtin.command: /sbin/sysctl -p /etc/sysctl.d/60-wonder-critique-render.conf
+  changed_when: true

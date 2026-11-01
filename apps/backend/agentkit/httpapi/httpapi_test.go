@@ -88,13 +88,12 @@ func TestSessionsCRUD(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("get = %d", res.StatusCode)
 	}
-	var got struct {
-		Messages []store.StoredMessage `json:"messages"`
-	}
-	if json.NewDecoder(res.Body).Decode(&got) != nil || len(got.Messages) != 0 {
-		t.Fatalf("get body = %+v", got)
-	}
+	raw, _ := io.ReadAll(res.Body)
 	res.Body.Close()
+	// An empty history must be a JSON array, not null (Go decoding hides the difference).
+	if !strings.Contains(string(raw), `"messages":[]`) {
+		t.Fatalf("get body = %s, want an empty messages array", raw)
+	}
 
 	req, _ := http.NewRequest("DELETE", srv.URL+"/sessions/"+sess.ID, nil)
 	if res, _ = srv.Client().Do(req); res.StatusCode != 204 {
@@ -103,6 +102,32 @@ func TestSessionsCRUD(t *testing.T) {
 	res, _ = srv.Client().Get(srv.URL + "/sessions/" + sess.ID)
 	if res.StatusCode != 404 {
 		t.Fatalf("get after delete = %d", res.StatusCode)
+	}
+}
+
+// Empty collections must serialize as JSON arrays, not null — JS consumers
+// crash on null.map(...) (decoding into a Go slice hides the difference).
+func TestEmptyListsAreArrays(t *testing.T) {
+	a, _ := newAgent(t)
+	srv := httptest.NewServer(newServer(t, a, nil))
+	defer srv.Close()
+
+	res, err := srv.Client().Get(srv.URL + "/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(string(raw), `"sessions":[]`) {
+		t.Fatalf("empty list = %d %s, want 200 with a sessions array", res.StatusCode, raw)
+	}
+
+	sess := mustSession(t, srv)
+	res, _ = srv.Client().Get(srv.URL + "/sessions/" + sess.ID)
+	raw, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if !strings.Contains(string(raw), `"messages":[]`) {
+		t.Fatalf("empty history = %s, want a messages array", raw)
 	}
 }
 

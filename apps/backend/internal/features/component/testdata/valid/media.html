@@ -1,0 +1,20 @@
+<div class="c1-card">
+  <span class="c1-dot"></span>
+</div>
+<style>
+  .c1-card { display: flex; gap: 8px; }
+  .c1-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+  @media (min-width: 600px) {
+    .c1-card { flex-direction: row; align-items: center; }
+    .c1-dot { width: 12px; height: 12px; }
+  }
+  @supports (display: grid) {
+    .c1-card { display: grid; grid-template-columns: auto 1fr; }
+  }
+  @container (min-width: 400px) {
+    .c1-dot { background: #16a34a; }
+  }
+  @layer base {
+    .c1-card { box-sizing: border-box; }
+  }
+</style>

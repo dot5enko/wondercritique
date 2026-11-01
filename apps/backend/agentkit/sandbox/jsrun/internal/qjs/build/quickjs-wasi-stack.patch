@@ -1,0 +1,41 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1880,9 +1880,6 @@
+     rt->js_class_id_alloc = JS_CLASS_INIT_COUNT;
+ 
+     rt->stack_size = JS_DEFAULT_STACK_SIZE;
+-#ifdef __wasi__
+-    rt->stack_size = 0;
+-#endif
+ 
+     JS_UpdateStackTop(rt);
+ 
+@@ -2579,11 +2576,27 @@
+ {
+     return ctx->rt;
+ }
++
++#if defined(__wasi__) && !defined(JS_WASI_STACK_RESERVE)
++#define JS_WASI_STACK_RESERVE (64 * 1024)
++#endif
+ 
+ static void update_stack_limit(JSRuntime *rt)
+ {
+ #if defined(__wasi__)
+-    rt->stack_limit = 0; /* no limit */
++    /* wondercritique patch: upstream disables the limit on WASI, so deep
++       recursion runs off the linker-sized shadow stack (corrupting static
++       data or trapping) instead of throwing RangeError. The shadow stack is
++       [__stack_low, __stack_high) and grows down; the limit never goes below
++       __stack_low + JS_WASI_STACK_RESERVE, whatever stack_size says (0 = as
++       deep as the stack allows). The reserve covers C code that runs between
++       two checks (host calls, libc, GC). */
++    extern unsigned char __stack_low;
++    uintptr_t low = (uintptr_t)&__stack_low + JS_WASI_STACK_RESERVE;
++    uintptr_t limit = 0;
++    if (rt->stack_size != 0 && rt->stack_top > rt->stack_size)
++        limit = rt->stack_top - rt->stack_size;
++    rt->stack_limit = limit > low ? limit : low;
+ #else
+     if (rt->stack_size == 0) {
+         rt->stack_limit = 0; /* no limit */

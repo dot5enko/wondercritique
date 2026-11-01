@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-wc-canvas="{{.Version}}">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="{{.CSP}}">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="{{.ColorScheme}}">
+<title>wondercritique canvas</title>
+<style id="wc-canvas">
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+html {
+  color-scheme: {{.ColorScheme}};
+  background: {{.Background}};
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+#wc-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: {{.Width}}px;
+  min-height: {{.StageHeight}}px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+/* Deterministic capture: animations and transitions jump to their end state. */
+*, *::before, *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  caret-color: transparent !important;
+}
+</style>
+</head>
+<body>
+<div id="wc-stage">
+{{.Fragment}}
+</div>
+</body>
+</html>

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
@@ -32,6 +33,14 @@ type Config struct {
 
 	ModelAPIKey string `env:"MODEL_API_KEY"`
 	AgentModel  string `env:"AGENT_MODEL" envDefault:"muse-spark-1.3-contributor"`
+
+	// Render (see docs/backend.render.md). Chrome is only started on the
+	// first render, so none of this is required to boot the app.
+	RenderChromePath      string        `env:"RENDER_CHROME_PATH"` // empty → auto-detect
+	RenderConcurrency     int           `env:"RENDER_CONCURRENCY" envDefault:"2"`
+	RenderTimeout         time.Duration `env:"RENDER_TIMEOUT" envDefault:"20s"`
+	RenderAllowedHosts    []string      `env:"RENDER_ALLOWED_HOSTS" envSeparator:","`
+	RenderChromeNoSandbox bool          `env:"RENDER_CHROME_NO_SANDBOX" envDefault:"false"`
 }
 
 // Module provides *Config.

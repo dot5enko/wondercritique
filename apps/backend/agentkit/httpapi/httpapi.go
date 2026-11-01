@@ -161,6 +161,9 @@ func (h *handler) listSessions(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	if sessions == nil {
+		sessions = []store.Session{} // an empty list must serialize as [], not null
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
 }
 
@@ -198,6 +201,9 @@ func (h *handler) getSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, err)
 		return
+	}
+	if history == nil {
+		history = []store.StoredMessage{} // an empty history must serialize as [], not null
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messages": history})
 }

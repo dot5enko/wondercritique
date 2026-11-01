@@ -68,6 +68,126 @@
     - Reload systemd
     - Restart backend
 
+# --- headless Chrome for the renderer (docs/backend.render.md) ---
+- name: Create state subdirectories for Chrome
+  # The unit sets HOME and TMPDIR here: ProtectSystem=strict makes /tmp
+  # read-only, and Chrome needs a writable HOME and profile directory.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ backend_service_name }}"
+    group: "{{ backend_service_name }}"
+    mode: "0750"
+  loop:
+    - "{{ backend_state_dir }}"
+    - "{{ backend_state_dir }}/tmp"
+
+- name: Install renderer browser and fonts (Debian family)
+  when: ansible_facts.os_family == "Debian"
+  block:
+    - name: Install Chrome prerequisites and fonts
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - fonts-dejavu-core
+          - fonts-liberation
+          - fonts-noto-color-emoji
+          - fonts-noto-core
+          - gnupg
+        state: present
+        update_cache: true
+
+    # Ubuntu's own chromium package is snap-only and cannot run as a systemd
+    # service, so Ubuntu gets Google Chrome stable from Google's apt repo.
+    - name: Install Google Chrome stable (Ubuntu)
+      when: ansible_facts.distribution == "Ubuntu"
+      block:
+        - name: Check architecture for Google's amd64-only Chrome repo
+          ansible.builtin.assert:
+            that:
+              - ansible_facts.architecture == "x86_64"
+            fail_msg: >-
+              Google Chrome packages are amd64-only; set
+              backend_render_chrome_path to a Chromium build for
+              {{ ansible_facts.architecture }} instead.
+
+        - name: Ensure apt keyrings directory exists
+          ansible.builtin.file:
+            path: /etc/apt/keyrings
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Fetch Google Chrome signing key
+          ansible.builtin.get_url:
+            url: https://dl.google.com/linux/linux_signing_key.pub
+            dest: /etc/apt/keyrings/google-chrome.pub
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Dearmor the Google Chrome signing key
+          ansible.builtin.command:
+            cmd: gpg --dearmor --yes -o /etc/apt/keyrings/google-chrome.gpg /etc/apt/keyrings/google-chrome.pub
+          args:
+            creates: /etc/apt/keyrings/google-chrome.gpg
+
+        - name: Add Google Chrome apt source
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/google-chrome.list
+            content: >-
+              deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg]
+              https://dl.google.com/linux/chrome/deb/ stable main
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Install Google Chrome stable package
+          ansible.builtin.apt:
+            name: google-chrome-stable
+            state: present
+            update_cache: true
+
+    # Debian ships a real chromium deb (no snap).
+    - name: Install Debian chromium deb
+      when: ansible_facts.distribution == "Debian"
+      ansible.builtin.apt:
+        name: chromium
+        state: present
+        update_cache: true
+
+    - name: Allow unprivileged user namespaces for Chrome's sandbox
+      # Ubuntu 24.04+ / Debian 13 (AppArmor 4) restrict unprivileged user
+      # namespaces per profile; Chrome ships no profile, so lift the
+      # restriction host-wide — but only where the kernel exposes the knob.
+      block:
+        - name: Check for the AppArmor unprivileged-userns restriction
+          ansible.builtin.stat:
+            path: /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          register: backend_apparmor_userns
+
+        - name: Write the sysctl that keeps user namespaces available
+          when: backend_apparmor_userns.stat.exists
+          ansible.builtin.copy:
+            dest: /etc/sysctl.d/60-wonder-critique-render.conf
+            content: |
+              # wondercritique: Chrome's sandbox runs on unprivileged user
+              # namespaces (docs/deploy.ansible.md).
+              kernel.apparmor_restrict_unprivileged_userns = 0
+            owner: root
+            group: root
+            mode: "0644"
+          notify: Apply render sysctl
+
+- name: Warn when no browser can be installed automatically
+  when: not (ansible_facts.os_family == "Debian" and ansible_facts.distribution in ["Ubuntu", "Debian"])
+  ansible.builtin.debug:
+    msg: >-
+      render: no automatic browser install for {{ ansible_facts.distribution }};
+      install Chromium yourself and set backend_render_chrome_path
+      (RENDER_CHROME_PATH).
+
 - name: Flush handlers before ensuring service state
   ansible.builtin.meta: flush_handlers
 

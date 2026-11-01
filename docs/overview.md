@@ -21,17 +21,23 @@ localrun.sh    Run backend + frontend dev servers together (see below)
   for anything but running the apps
 - Temp/work files go to `./tmp` inside the repo (not system /tmp)
 
-## localrun.sh (2026-10-31)
+## localrun.sh (2026-11-01)
 
 Root-level dev runner: starts backend (`apps/backend`, :8080) and frontend
 (`apps/frontend`, :5173) in parallel with `[backend]`/`[frontend]` log prefixes.
-Ctrl+C (or TERM) kills both process groups (`set -m` + `kill -- -PGID`; needed
+Ctrl+C (SIGINT/SIGTERM) kills both process groups (`set -m` + `kill -- -PGID`; needed
 because npm detaches vite and `go run` spawns a child server).
 
-- Backend: uses `task dev` when `task` is installed (Taskfile loads `.env`);
-  otherwise falls back to `go run ./cmd/server` after parsing `.env`
-  line-by-line (plain `source` breaks on the unquoted `MAIL_FROM=... <...>` value).
-- Creates `apps/backend/.env` from `.env.example` if missing (backend fails to
-  start without it, e.g. mailer requires `MAIL_FROM` when `RESEND_API_KEY` is
-  set — a stray exported `RESEND_API_KEY` in the shell breaks startup without `.env`).
-- Frontend: runs `npm install` first if `node_modules` is missing, then `npm run dev -- --host`.
+- Does **not** parse `.env` itself: the backend loads `apps/backend/.env` on startup
+  (godotenv — real env wins, then `.env`), so bash never reproduces dotenv quoting.
+  `env_get` only *peeks* at single keys for preflight hints.
+- Backend runner: `task dev` when `task` is installed **and** `task --list` reports a
+  `dev` task; otherwise falls back to `go run ./cmd/server`.
+- Preflight: creates `apps/backend/.env` from `.env.example` when missing; warns when
+  port 8080/5173 is already listening; warns when no Chrome/Chromium is found (checks
+  `RENDER_CHROME_PATH`, well-known macOS app paths, Playwright caches under
+  `~/Library/Caches/ms-playwright` and `~/.cache/ms-playwright`, and PATH) — rendering
+  is lazy, so this is a hint, not a startup failure.
+- Verified 2026-11-01: start + `/healthz` 200 + frontend 200, `.env` auto-create, both
+  backend fallbacks (no `task`, and `task` without a `dev` task), busy-port warning,
+  Chrome-missing warning, and clean group shutdown on Ctrl+C (no leftover processes).

@@ -1,6 +1,6 @@
 # Deploy — Ansible
 
-State as of 2026-10-31. Location: `deploy/ansible/`. Owned by a separate deploy
+State as of 2026-11-01. Location: `deploy/ansible/`. Owned by a separate deploy
 tool; app work only authors the files, playbooks are never run from app work.
 
 ## Layout
@@ -30,6 +30,42 @@ deploy/ansible/
   unit `/etc/systemd/system/wonder-critique-backend.service`
 - state (sqlite) in `/var/lib/wonder-critique`; binds `127.0.0.1:11111`
   (`backend_port`, role default); probes `/readyz` after start
+- headless Chrome for the renderer (added 2026-11-01, see
+  `docs/backend.render.md`):
+  - browser install is Debian-family only — **Ubuntu** gets Google Chrome
+    stable from Google's apt repo (`dl.google.com/linux/chrome/deb`, signing
+    key dearmored into `/etc/apt/keyrings/`, amd64 asserted; the Ubuntu
+    `chromium` package is snap-only and cannot run under systemd), **Debian**
+    gets the distro `chromium` deb; any other distro logs a warning and you
+    must set `backend_render_chrome_path` yourself
+  - fonts: `fonts-noto-core`, `fonts-noto-color-emoji`, `fonts-liberation`,
+    `fonts-dejavu-core` (plus `ca-certificates`, `gnupg` for the Chrome repo)
+  - `{{ backend_state_dir }}/tmp` is created owned by the service user; the
+    unit sets `HOME={{ backend_state_dir }}` and `TMPDIR=…/tmp` because
+    `ProtectSystem=strict` makes the real `/tmp` read-only (Chrome needs a
+    writable HOME, profile and temp dir; chromedp's profile dir follows
+    `TMPDIR`)
+  - systemd hardening adjusted for Chrome's sandbox (unit comments carry the
+    rationale): `RestrictNamespaces=true` → allow-list `user mnt pid net`
+    (Chrome enters user/mount/PID/network namespaces; cgroup, ipc, uts, time
+    stay closed), `AF_NETLINK` added to `RestrictAddressFamilies` (Chrome's
+    network service watches link/route changes). Reviewed and kept as-is:
+    `NoNewPrivileges` + `RestrictSUIDSGID` (Chrome falls back to the
+    user-namespace sandbox, no setuid helper), `PrivateDevices` (chromedp
+    passes `--disable-dev-shm-usage`, so no `/dev/shm` needed), `ProtectHome`
+    (Chrome installs under `/opt`/`/usr`), `ProtectProc`/`ProcSubset=pid`
+    (Chrome only needs `/proc/self` and `/proc/<pid>`)
+  - Ubuntu 24.04+ / Debian 13 (AppArmor 4) restrict unprivileged user
+    namespaces host-wide; the role stats
+    `/proc/sys/kernel/apparmor_restrict_unprivileged_userns` and, where it
+    exists, writes `/etc/sysctl.d/60-wonder-critique-render.conf`
+    (`kernel.apparmor_restrict_unprivileged_userns = 0`) and applies it via
+    the `Apply render sysctl` handler — which runs in the pre-start handler
+    flush, so the kernel allows Chrome's sandbox before the service starts
+  - env knobs rendered into `backend.env`: `RENDER_CHROME_PATH`,
+    `RENDER_CONCURRENCY`, `RENDER_TIMEOUT`, `RENDER_ALLOWED_HOSTS`,
+    `RENDER_CHROME_NO_SANDBOX` from the `backend_render_*` role defaults
+    (never set `backend_render_chrome_no_sandbox: true` in production)
 
 ### frontend (tag: `frontend`) — added 2026-10-31
 
@@ -64,6 +100,12 @@ deploy/ansible/
 
 - `backend_cors_origins: []` — rendered into backend `CORS_ORIGINS`;
   frontend origin goes here for cross-origin API calls
+- renderer knobs (`roles/backend/defaults/main.yml`, added 2026-11-01):
+  `backend_render_chrome_path` (empty = auto-detect),
+  `backend_render_concurrency` (2), `backend_render_timeout` (`20s`),
+  `backend_render_allowed_hosts` (extra hosts fragments may load from,
+  Google Fonts always allowed), `backend_render_chrome_no_sandbox`
+  (false — keep it false)
 - vault (all `vault_`-prefixed; empty placeholders live in vars.yml, real
   values in vault.yml): `vault_jwt_secret` (>= 32 bytes, asserted in
   pre_tasks), resend key, mail-from, model API key, and since 2026-10-31 both
