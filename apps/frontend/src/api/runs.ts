@@ -29,6 +29,18 @@ export interface StartRunBody {
   pipeline_version_id?: string
   /** Studio test run (may use drafts, not counted like production runs). */
   is_test?: boolean
+  /**
+   * ASSUMPTION: follow-up message in the same chat — the engine attaches the
+   * thread's previous brief/final artifact/critique as context. The first run
+   * of a chat omits it; the backend echoes the thread id back on the run.
+   */
+  thread_id?: string
+  /**
+   * ASSUMPTION: which pipeline to run (its latest published version is pinned
+   * server-side). Omitted = the default published pipeline. The original plan
+   * contract only had `pipeline_version_id`, which the UI cannot know.
+   */
+  pipeline_id?: string
   input: Record<string, RunInputValue>
 }
 
@@ -55,13 +67,28 @@ export interface RunListItem {
   usage: TokenUsage | null
   cost: number | null
   created_at: string
+  /** ASSUMPTION: present on follow-up runs of the same chat thread (see StartRunBody). */
+  thread_id?: string | null
+  /** ASSUMPTION: used to title chat threads by their first brief. */
+  input?: Record<string, RunInputValue>
+}
+
+export interface ListRunsParams {
+  limit?: number
+  offset?: number
+  cursor?: string
+  /** ASSUMPTION: serialized as `filter[thread_id]=…` (CRUD registry convention). */
+  filter?: { thread_id?: string }
 }
 
 export function listRuns(
-  params: { limit?: number; offset?: number; cursor?: string } = {},
+  params: ListRunsParams = {},
   signal?: AbortSignal,
 ): Promise<{ items: RunListItem[]; next_cursor?: string | null }> {
-  return apiGet<{ items: RunListItem[]; next_cursor?: string | null }>(`/runs${toQuery(params)}`, { signal })
+  const query: Record<string, unknown> = { ...params }
+  if (params.filter?.thread_id) query['filter[thread_id]'] = params.filter.thread_id
+  delete (query as { filter?: unknown }).filter
+  return apiGet<{ items: RunListItem[]; next_cursor?: string | null }>(`/runs${toQuery(query)}`, { signal })
 }
 
 /* ---------- artifacts ---------- */
@@ -188,6 +215,8 @@ export interface Run {
   error: string | null
   created_at: string
   updated_at?: string
+  /** ASSUMPTION: set on follow-up runs of the same chat thread (see StartRunBody). */
+  thread_id?: string | null
   steps: RunStep[]
   artifacts: Artifact[]
 }

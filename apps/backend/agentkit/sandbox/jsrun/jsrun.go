@@ -19,11 +19,11 @@
 // no file system, network or exec support they can only sleep (bounded by the deadline), read
 // clocks or exit the instance.
 //
-// Recursion: the engine (rebuilt with a stack-limit patch, see internal/qjs/build) has a 1 MiB
-// stack and throws an ordinary, catchable RangeError "Maximum call stack size exceeded" when it
-// runs out: after about 3300 plain nested calls, 1400 through callbacks such as
-// Array.prototype.map, 600 through sort comparators. ErrorKind "crash" is left for genuine
-// engine failures (wasm traps, corrupted bytecode).
+// Recursion: the engine (rebuilt with a stack-limit patch, see internal/qjs/build) throws an
+// ordinary, catchable RangeError "Maximum call stack size exceeded" when a script uses more
+// than Config.StackLimit of stack. The default 32 KiB fits about 100 nested calls of a typical
+// function, 50 through callbacks such as Array.prototype.map, 20 through sort comparators.
+// ErrorKind "crash" is left for genuine engine failures (wasm traps, corrupted bytecode).
 package jsrun
 
 import (
@@ -54,6 +54,9 @@ const (
 	DefaultMaxResult     = 32 << 10
 	DefaultMaxCodeSize   = 256 << 10
 	DefaultMaxConcurrent = 4
+	DefaultStackLimit    = 32 << 10
+	MinStackLimit        = 32 << 10  // the prelude needs it to serialize a 64-level result
+	MaxStackLimit        = 128 << 10 // the engine's whole JS stack (see internal/qjs/build)
 
 	// wasmMemoryPages is the hard cap on each instance's wasm linear memory (64 KiB pages):
 	// 128 MiB, which leaves room above MaxMemoryLimit for the engine's own data, stack and
@@ -90,6 +93,11 @@ type Config struct {
 	MaxCodeSize int
 	// MaxConcurrent caps runs executing at once (default 4); further runs wait for a slot.
 	MaxConcurrent int
+	// StackLimit caps the engine stack available to JS code, in bytes (default and minimum
+	// 32 KiB, at most MaxStackLimit = 128 KiB). Going deeper throws RangeError "Maximum call
+	// stack size exceeded". 32 KiB fits about 100 nested calls of a typical function, 50 through
+	// callbacks such as Array.prototype.map; see approxDepth.
+	StackLimit int
 }
 
 // WithDefaults returns c with zero fields replaced by defaults and limits clamped.
@@ -113,7 +121,19 @@ func (c Config) WithDefaults() Config {
 	if c.MaxConcurrent <= 0 {
 		c.MaxConcurrent = DefaultMaxConcurrent
 	}
+	if c.StackLimit <= 0 {
+		c.StackLimit = DefaultStackLimit
+	}
+	c.StackLimit = min(max(c.StackLimit, MinStackLimit), MaxStackLimit)
 	return c
+}
+
+// approxDepth estimates how many nested calls fit in a stack limit, from measured per-frame
+// costs: ~330 bytes for a typical function (a few arguments and locals), ~650 when each level
+// also goes through a native callback such as Array.prototype.map. Used for messages only.
+func approxDepth(stackLimit int) (calls, viaCallbacks int) {
+	round := func(n int) int { return (n + 5) / 10 * 10 }
+	return round(stackLimit / 330), round(stackLimit / 650)
 }
 
 // Request is one script execution.
@@ -280,10 +300,11 @@ type execution struct {
 
 func (ex *execution) run() (res *Result, err error) {
 	rt, err := qjs.New(qjs.Option{
-		Context:     ex.ctx,
-		MemoryLimit: ex.cfg.MemoryLimit,
-		Stdout:      ex.out,
-		Stderr:      ex.out,
+		Context:      ex.ctx,
+		MemoryLimit:  ex.cfg.MemoryLimit,
+		MaxStackSize: ex.cfg.StackLimit,
+		Stdout:       ex.out,
+		Stderr:       ex.out,
 	})
 	if err != nil {
 		// A deadline or cancellation during startup surfaces here too.

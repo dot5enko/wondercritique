@@ -28,8 +28,8 @@ func TestStackLimit(t *testing.T) {
 		defer v.Free()
 		return v.Int64()
 	}
-	full, small := depth(0), depth(64<<10)
-	if full < 2000 || small < 50 || small*4 > full {
+	full, small := depth(0), depth(16<<10) // full: the whole 128 KiB JS stack, ~470 frames
+	if full < 300 || small < 20 || small*4 > full {
 		t.Fatalf("depth with MaxStackSize 0 = %d, with 64 KiB = %d: limit not applied", full, small)
 	}
 }

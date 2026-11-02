@@ -13,6 +13,7 @@
  */
 import { ArrowRight, MousePointerClick, Plus, Trash2, X } from 'lucide-react'
 import { Badge, Button, Callout, EmptyState, Field, IconButton, Input, Select, cx, type SelectOption } from '../../../ui'
+
 import { SchemaForm } from '../../../components'
 import type { JSONSchema, NodeType } from '../../../api/studio'
 import {
@@ -33,6 +34,7 @@ export type PanelTarget =
 export interface ConfigPanelProps {
   target: PanelTarget
   nodes: PipelineRFNode[]
+  edges: PipelineRFEdge[]
   refs: EditorRefs
   onNodeConfig: (id: string, config: Record<string, unknown>) => void
   /** Node deletion goes through the editor's ConfirmDialog. */
@@ -40,12 +42,21 @@ export interface ConfigPanelProps {
   onDeleteEdge: (id: string) => void
 }
 
-export function ConfigPanel({ target, nodes, refs, onNodeConfig, onRequestNodeDelete, onDeleteEdge }: ConfigPanelProps) {
+export function ConfigPanel({ target, nodes, edges, refs, onNodeConfig, onRequestNodeDelete, onDeleteEdge }: ConfigPanelProps) {
   if (!target) {
     return <EmptyState icon={MousePointerClick} title="Nothing selected" description="Select a node or a wire on the canvas to edit it." className="py-10" />
   }
   if (target.kind === 'node') {
-    return <NodePanel node={target.node} refs={refs} onConfig={onNodeConfig} onDeleteRequest={onRequestNodeDelete} />
+    return (
+      <NodePanel
+        node={target.node}
+        nodes={nodes}
+        edges={edges}
+        refs={refs}
+        onConfig={onNodeConfig}
+        onDeleteRequest={onRequestNodeDelete}
+      />
+    )
   }
   return <EdgePanel edge={target.edge} nodes={nodes} refs={refs} onDelete={onDeleteEdge} />
 }
@@ -54,11 +65,15 @@ export function ConfigPanel({ target, nodes, refs, onNodeConfig, onRequestNodeDe
 
 function NodePanel({
   node,
+  nodes,
+  edges,
   refs,
   onConfig,
   onDeleteRequest,
 }: {
   node: PipelineRFNode
+  nodes: PipelineRFNode[]
+  edges: PipelineRFEdge[]
   refs: EditorRefs
   onConfig: (id: string, config: Record<string, unknown>) => void
   onDeleteRequest: (id: string) => void
@@ -66,6 +81,7 @@ function NodePanel({
   const nt = nodeTypeOf(refs.catalog, node.data.nodeType)
   const config = node.data.config
   const patch = (next: Record<string, unknown>) => onConfig(node.id, next)
+  const ctx = nodeContext(node, nodes, edges, refs)
 
   return (
     <div className="flex flex-col gap-4 p-3.5">
@@ -82,6 +98,39 @@ function NodePanel({
           onClick={() => onDeleteRequest(node.id)}
         />
       </div>
+
+      <div className="flex flex-col gap-1 rounded-lg border border-line bg-app/40 p-2.5 text-xs leading-relaxed">
+        <p>
+          <span className="font-medium text-ink-2">When:</span> <span className="text-ink-2">{ctx.when}</span>
+        </p>
+        <p>
+          <span className="font-medium text-ink-2">Gets:</span>{' '}
+          {ctx.gets.length > 0 ? (
+            <span className="text-ink-2">{ctx.gets.join('; ')}</span>
+          ) : (
+            <span className="text-warning">nothing wired in yet</span>
+          )}
+        </p>
+        <p>
+          <span className="font-medium text-ink-2">Sends:</span>{' '}
+          {ctx.sends.length > 0 ? (
+            <span className="text-ink-2">{ctx.sends.join('; ')}</span>
+          ) : (
+            <span className="text-warning">nowhere yet</span>
+          )}
+        </p>
+      </div>
+
+      {node.data.nodeType === 'gate' && (
+        <Callout tone="info" title="What the gate does">
+          <p className="mt-1 text-xs">
+            After each iteration the gate looks at the critique score: <b>continue</b> sends the work
+            back for another round (wire it to the generator's feedback port), <b>done</b> finishes
+            the run and the best-scoring iteration is kept. Configure the score threshold and the
+            iteration cap below.
+          </p>
+        </Callout>
+      )}
 
       {nt?.description && <p className="text-xs leading-relaxed text-ink-2">{nt.description}</p>}
 
@@ -269,6 +318,36 @@ function InputFieldsEditor({ config, onChange }: { config: Record<string, unknow
       </div>
     </section>
   )
+}
+
+/* ---------- node context (When / Gets / Sends) ---------- */
+
+/** Human summary of where a node sits in the graph, from the current wires. */
+function nodeContext(
+  node: PipelineRFNode,
+  nodes: PipelineRFNode[],
+  edges: PipelineRFEdge[],
+  refs: EditorRefs,
+): { when: string; gets: string[]; sends: string[] } {
+  const label = (id: string): string => {
+    const n = nodes.find((x) => x.id === id)
+    return n ? nodeTitle(n.data, refs) : id
+  }
+  const incoming = edges.filter((e) => e.target === node.id)
+  const outgoing = edges.filter((e) => e.source === node.id)
+  const sources = [...new Set(incoming.map((e) => label(e.source)))]
+  const looped = incoming.some((e) => e.data?.loop)
+
+  let when: string
+  if (node.data.nodeType === 'input') when = 'At the start of every iteration — it feeds the run’s input'
+  else if (looped) when = 'When the Gate says continue — the next iteration starts here'
+  else if (sources.length > 1) when = `After ${sources.join(' and ')} finish (they run in parallel)`
+  else if (sources.length === 1) when = `After ${sources[0]} finishes`
+  else when = 'Once its input is wired and everything upstream is ready'
+
+  const gets = incoming.map((e) => `${e.targetHandle ?? '?'} ← ${label(e.source)}`)
+  const sends = outgoing.map((e) => `${e.sourceHandle ?? '?'} → ${label(e.target)}`)
+  return { when, gets, sends }
 }
 
 /* ---------- edge panel ---------- */

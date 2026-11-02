@@ -23,10 +23,11 @@ WORK=${1:-$(git -C "$HERE" rev-parse --show-toplevel)/tmp/qjs-wasm-build}
 OUT=${2:-$HERE/../qjs.wasm}
 
 # Shadow stack size and the part of it kept free below the JS stack limit for C code that runs
-# between two checks. JS recursion depth scales with STACK_SIZE - STACK_RESERVE (1 MiB: ~3300
-# plain calls). The wazero native stack grows ~30 MiB of transient Go memory per MiB at full
-# depth and traps at ~50 MB, so keep STACK_SIZE at 1 MiB unless that is re-measured.
-STACK_SIZE=${STACK_SIZE:-1048576}
+# between two checks. The deepest JS can go is STACK_SIZE - STACK_RESERVE (128 KiB: ~450 plain
+# calls); jsrun lowers it further per run (Config.StackLimit). The stack is part of every
+# instance's linear memory, and full-depth recursion costs ~30 MiB of transient Go memory per
+# MiB in wazero's native stack, so keep it small.
+STACK_SIZE=${STACK_SIZE:-262144}
 STACK_RESERVE=${STACK_RESERVE:-131072}
 
 # Pinned sources.

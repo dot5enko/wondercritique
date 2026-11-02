@@ -18,7 +18,7 @@ const toolDesc = `Run a JavaScript program in an isolated sandbox (QuickJS, mode
 - The value of the last expression is the result, returned as JSON. Top-level await works; a promise result is awaited.
 - console.log/info/warn/error print one line per call (objects are shown as JSON).
 - No network, no require/import of packages, no state kept between calls: each call starts from scratch.
-- Limits: %s wall time, %d MiB memory, %d KiB console output (the rest is dropped), %d KiB result. Recursion deeper than about 3000 calls (about 1000 through callbacks like map/forEach) throws RangeError "Maximum call stack size exceeded"; walk very deep structures with a loop and an explicit stack.%s`
+- Limits: %s wall time, %d MiB memory, %d KiB console output (the rest is dropped), %d KiB result. Recursion deeper than about %d calls (about %d through callbacks like map/forEach) throws RangeError "Maximum call stack size exceeded"; walk deeper structures with a loop and an explicit stack.%s`
 
 const toolFSDesc = `
 - Workspace files are available through the global fs object (absolute paths like /work/notes.md):
@@ -40,7 +40,9 @@ func NewTool(runner *Runner, fsys vfs.FS) tool.Tool {
 	if fsys != nil {
 		fsDesc = toolFSDesc
 	}
-	desc := fmt.Sprintf(toolDesc, cfg.Timeout, cfg.MemoryLimit>>20, cfg.MaxOutput>>10, cfg.MaxResult>>10, fsDesc)
+	calls, viaCallbacks := approxDepth(cfg.StackLimit)
+	desc := fmt.Sprintf(toolDesc, cfg.Timeout, cfg.MemoryLimit>>20, cfg.MaxOutput>>10, cfg.MaxResult>>10,
+		calls, viaCallbacks, fsDesc)
 
 	return tool.New(ToolName, desc, func(ctx context.Context, in toolInput) (string, error) {
 		res, err := runner.Run(ctx, Request{Code: in.Code, FS: fsys})

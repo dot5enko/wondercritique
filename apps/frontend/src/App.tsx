@@ -4,10 +4,11 @@
  * Route table:
  *   /login                          public — email-code login, no shell
  *   /showcase                       dev-only design-system showcase (no shell)
- *   /          (auth shell)         → redirect to /runs
- *   /runs, /runs/:id                placeholders
- *   /chat                           placeholder
- *   /studio/*, /settings            admin-only placeholders
+ *   /          (auth shell)         → redirect to /chat
+ *   /chat                           design chat: every chat = a pipeline run
+ *   /runs/:id                       full run details (opened from the chat); /runs → /chat
+ *   /agent-chat                     talk to a single published agent
+ *   /studio/*, /settings            admin-only configuration
  *
  * All pages are React.lazy code-split; `RequireAuth`/`RequireAdmin` guard the
  * shell and admin subtrees (src/features/auth.tsx).
@@ -19,9 +20,9 @@ import Shell from './pages/shell'
 
 const LoginPage = lazy(() => import('./pages/login'))
 const ShowcasePage = lazy(() => import('./pages/showcase'))
-const RunsPage = lazy(() => import('./pages/runs'))
 const RunDetailPage = lazy(() => import('./pages/runs/detail'))
 const ChatPage = lazy(() => import('./pages/chat'))
+const AgentChatPage = lazy(() => import('./pages/agent-chat'))
 const SettingsPage = lazy(() => import('./pages/settings'))
 const PipelinesPage = lazy(() => import('./pages/studio/pipelines'))
 const AgentsPage = lazy(() => import('./pages/studio/agents'))
@@ -49,10 +50,11 @@ const router = createBrowserRouter([
           </RequireAuth>
         ),
         children: [
-          { index: true, loader: () => redirect('/runs') },
-          { path: 'runs', element: <RunsPage /> },
-          { path: 'runs/:id', element: <RunDetailPage /> },
+          { index: true, loader: () => redirect('/chat') },
           { path: 'chat', element: <ChatPage /> },
+          { path: 'runs', loader: () => redirect('/chat') },
+          { path: 'runs/:id', element: <RunDetailPage /> },
+          { path: 'agent-chat', element: <AgentChatPage /> },
           {
             path: 'studio/pipelines',
             element: (

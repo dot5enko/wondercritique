@@ -1,6 +1,6 @@
 # Frontend
 
-State as of 2026-11-01 (app shell + router + API layer + auth + all studio/runs/chat sections).
+State as of 2026-11-02 (app shell + router + API layer + auth + all studio/runs/chat sections).
 
 ## Location & stack
 
@@ -9,7 +9,8 @@ State as of 2026-11-01 (app shell + router + API layer + auth + all studio/runs/
 
 - Vite 8, React 19, TypeScript ~7.0.2, `@vitejs/plugin-react`
 - Extra runtime deps: `lucide-react`, `react-router` v7 (createBrowserRouter, data router),
-  `@xyflow/react` v12 (pipeline editor + read-only run graph), self-hosted fonts.
+  `@xyflow/react` v12 (pipeline editor + read-only run graph), `react-markdown` +
+  `remark-gfm` (chat/agent text via `components/Markdown.tsx`), self-hosted fonts.
 - No global state library, no chart lib (score chart is hand-rolled SVG), no linter (by design so far).
 
 ## Layout
@@ -21,7 +22,7 @@ State as of 2026-11-01 (app shell + router + API layer + auth + all studio/runs/
 | `src/ui/` | design system (untouched by app code; app never edits it) |
 | `src/api/` | typed API layer — `client` (fetch wrapper, ApiError `{"error":{code,message,fields}}`, single-flight refresh, session in localStorage `wc_access`/`wc_refresh`/`wc_user`), `sse` (fetch-based SSE for POST+GET with Authorization), `auth`, `studio`, `settings`, `runs`, `agents`, `types`, barrel |
 | `src/features/auth.tsx` | `AuthProvider`/`useAuth`, `RequireAuth`/`RequireAdmin` guards, boot hydration via `GET /auth/me` |
-| `src/components/` | shared app components: `Modal`, `ConfirmDialog`, `SchemaForm` (JSON-Schema subset + `ui:*` hints), `VersionBar` (save-draft/publish/versions/diff/restore — calls `api/studio` itself), `Diff` (`diffJson`/`diffText` + `DiffView`), `PageHeader`, `ListPage`, `Errors` (`Loadable`, `ErrorState`, `ForbiddenState`, `NotFoundState`), `format` (relative/absolute time); barrel `index.ts` |
+| `src/components/` | shared app components: `Modal`, `ConfirmDialog`, `SchemaForm` (JSON-Schema subset + `ui:*` hints), `VersionBar` (save-draft/publish/versions/diff/restore — calls `api/studio` itself), `Diff` (`diffJson`/`diffText` + `DiffView`), `PageHeader`, `ListPage`, `Errors` (`Loadable`, `ErrorState`, `ForbiddenState`, `NotFoundState`), `Markdown` (react-markdown + GFM; wrapper-level Tailwind styling, no raw HTML, links target _blank), `format` (relative/absolute time); barrel `index.ts` |
 | `src/hooks/` | `useAsync` (abortable, stale-safe), `useDebouncedCallback`, `useDirtyDraft` (dirty tracking + 800 ms debounced draft autosave) |
 | `src/pages/` | one dir per route section (below); pages are lazy-loaded default exports |
 | `src/pages/showcase/` | the old design-system showcase, preserved at `/showcase` (dev-only) |
@@ -78,6 +79,10 @@ vhost with SPA fallback (see `docs/deploy.ansible.md`). Production API is cross-
 `backend_cors_origins`.
 
 ## Known gaps / TODO
+
+- **(2026-11-02) Studio + Settings are invisible in practice**: nav hides them unless `user.role === 'admin'`
+  (`pages/shell.tsx`), and the `ADMIN_EMAILS` bootstrap (plan §7) is not implemented in the backend — every
+  login is role `user`. Even as admin the pages would error: studio/runs/settings endpoints don't exist yet.
 
 - Identity (name/slug/description) of studio defs is fixed at creation — no `PUT /{kind}/{id}`
   endpoint in the plan; editors render identity read-only. Backend decision pending.

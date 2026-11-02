@@ -1,6 +1,6 @@
 # Frontend — Studio, Runs, Chat sections
 
-State as of 2026-11-01. Feature-level reference for the pages built on the base app
+State as of 2026-11-02. Feature-level reference for the pages built on the base app
 (see `docs/frontend.md` for stack/router/API-layer/auth). All data fetching goes through
 `src/api/*`; shared UI from `src/components/*`; forms bound via `useDirtyDraft` with
 debounced autosave to `PUT /studio/{kind}/{id}/draft` and `VersionBar` for publishing.
@@ -92,8 +92,12 @@ lives at reserved `config.label` (filtered out of generated SchemaForms).
 
 `?agent=<slug>` (default `critic`); admin picker over `listDefs('agent')` published defs,
 falling back to a mono slug Input. Left session rail (new/delete/select) + thread + composer
-(Enter send / Shift+Enter newline, Send↔Stop). `AgentRunEvent` mapping: `text_delta` appends
-per-segment (tool calls split segments so commentary→tool→answer order is preserved),
+(Enter send / Shift+Enter newline, Send↔Stop). Messages span the full container width
+(`max-w-3xl` column): user messages stay a right-aligned accent-soft bubble that grows to
+100% when long; assistant text is a borderless full-width block rendered as markdown via
+shared `components/Markdown.tsx` (GFM tables/lists/strikethrough; user input and tool
+output stay plain text). `AgentRunEvent` mapping: `text_delta` appends per-segment (tool
+calls split segments so commentary→tool→answer order is preserved),
 `reasoning_delta` → collapsed "Thinking…" row, tool_call events → collapsible rows (history
 `tool_result` blocks folded in by `tool_call_id`), `run_failed` → Callout + Retry. Busy
 session (409) → warning Callout with cancel action. Stop = `cancelAgentRun` + abort

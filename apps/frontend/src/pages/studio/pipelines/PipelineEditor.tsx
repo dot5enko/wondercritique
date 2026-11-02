@@ -30,8 +30,9 @@ import {
   type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ArrowLeft, CircleAlert, CircleCheck, Plus, ShieldCheck, TriangleAlert, Workflow } from 'lucide-react'
+import { ArrowLeft, CircleAlert, CircleCheck, Plus, ShieldCheck, TriangleAlert, Workflow, X } from 'lucide-react'
 import { Badge, Button, Collapsible, EmptyState, IconButton, Menu, cx } from '../../../ui'
+import { Callout } from '../../../ui/Display'
 import { ConfirmDialog, VersionBar } from '../../../components'
 import {
   putDraft,
@@ -49,6 +50,7 @@ import {
   RF_NODE_TYPE,
   bodyToFlow,
   checkConnection,
+  designLoopTemplate,
   emptyPipelineBody,
   flowToBody,
   lintBody,
@@ -97,6 +99,18 @@ const FLASH_TONES: Record<Flash['tone'], string> = {
 interface Flash {
   tone: 'danger' | 'success' | 'warning'
   text: string
+}
+
+/** One-line explanation per node type, shown in the Add-node palette
+ * (catalog description wins when present). */
+const NODE_TYPE_HINTS: Record<string, string> = {
+  input: 'Asks the user for the brief when a run starts.',
+  agent: 'Runs one agent — writes, critiques, decides. Pick the agent in its config.',
+  validate: 'Checks the HTML against the component rules.',
+  render: 'Screenshots the HTML so vision agents can see it.',
+  merge: 'Combines several critiques into one.',
+  gate: 'Decides: loop back for another iteration, or finish. Configure the score threshold and max iterations.',
+  output: 'Where the finished result leaves the pipeline.',
 }
 
 interface ValidationResult {
@@ -346,6 +360,37 @@ function EditorBody({ def, catalog, agents, onBack, onDefSaved }: PipelineEditor
       ? { kind: 'edge', edge: selectedEdge }
       : null
 
+  /* ---------- help strip + template ---------- */
+
+  const [helpOpen, setHelpOpen] = useState(() => {
+    try {
+      return localStorage.getItem('wc_pipeline_help_v1') == null
+    } catch {
+      return true
+    }
+  })
+  const dismissHelp = useCallback(() => {
+    setHelpOpen(false)
+    try {
+      localStorage.setItem('wc_pipeline_help_v1', '1')
+    } catch {
+      // private mode — the strip just reappears next visit
+    }
+  }, [])
+
+  const insertTemplate = useCallback(() => {
+    const body = designLoopTemplate(catalog, agents)
+    if (!body) {
+      showFlash('warning', 'Template unavailable — the catalog did not load.')
+      return
+    }
+    const flow = bodyToFlow(body)
+    setNodes(flow.nodes)
+    setEdges(flow.edges)
+    commit(flow.nodes, flow.edges)
+    window.setTimeout(() => void rf.fitView({ padding: 0.2, duration: 300 }), 80)
+  }, [agents, catalog, commit, rf, setEdges, setNodes, showFlash])
+
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const confirmDeleteTitle = confirmDeleteId ? nodeTitle(nodesRef.current.find((n) => n.id === confirmDeleteId)?.data ?? { nodeType: '?', config: {}, issues: [] }, refs) : ''
 
@@ -380,9 +425,11 @@ function EditorBody({ def, catalog, agents, onBack, onDefSaved }: PipelineEditor
             <Menu.Label>Node types</Menu.Label>
             {catalog.node_types.map((nt) => {
               const Icon = nodeIcon(nt.type)
+              const hint = (typeof nt.description === 'string' && nt.description.trim()) || (NODE_TYPE_HINTS[nt.type] ?? '')
               return (
                 <Menu.Item key={nt.type} icon={Icon} onClick={() => addNode(nt)}>
                   {nt.name}
+                  {hint && <span className="ml-1 hidden text-2xs text-ink-3 lg:inline">— {hint}</span>}
                 </Menu.Item>
               )
             })}
@@ -436,6 +483,26 @@ function EditorBody({ def, catalog, agents, onBack, onDefSaved }: PipelineEditor
         {/* canvas + config panel */}
         <div className="flex min-h-0 flex-1">
           <div ref={canvasRef} className="relative min-w-0 flex-1" style={RF_VARS}>
+            {helpOpen && (
+              <div className="absolute left-1/2 top-3 z-10 w-[min(560px,90%)] -translate-x-1/2">
+                <Callout tone="info" title="How the graph works" className="pr-8 shadow-md">
+                  <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs">
+                    <li>Click a node to configure it; drag from an output port to an input port to wire.</li>
+                    <li>Wires only connect compatible ports. Data flows left to right during each iteration.</li>
+                    <li>The dashed animated wire is the loop: the Gate sends work back for another iteration until the score passes (or the limits hit).</li>
+                    <li>Validate checks the graph; Publish makes it usable in the design chat.</li>
+                  </ul>
+                </Callout>
+                <IconButton
+                  icon={<X />}
+                  label="Dismiss help"
+                  size="sm"
+                  variant="ghost"
+                  className="absolute right-1 top-1"
+                  onClick={dismissHelp}
+                />
+              </div>
+            )}
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -459,8 +526,21 @@ function EditorBody({ def, catalog, agents, onBack, onDefSaved }: PipelineEditor
               <Controls showInteractive={false} className="overflow-hidden rounded-md border border-line" />
             </ReactFlow>
             {nodes.length === 0 && (
-              <div className="pointer-events-none absolute inset-0 grid place-items-center">
-                <EmptyState icon={Workflow} title="Empty canvas" description="Add nodes from the toolbar and wire them together." />
+              <div className="absolute inset-0 grid place-items-center">
+                <div className="flex flex-col items-center gap-3 rounded-xl border border-line bg-surface p-6 text-center shadow-xs">
+                  <EmptyState
+                    icon={Workflow}
+                    title="Empty canvas"
+                    description="Start from the built-in design loop, or add nodes yourself."
+                    className="py-0"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="primary" onClick={insertTemplate}>
+                      Use the design loop template
+                    </Button>
+                    <span className="text-2xs text-ink-3">or add nodes from the toolbar above</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -468,6 +548,7 @@ function EditorBody({ def, catalog, agents, onBack, onDefSaved }: PipelineEditor
             <ConfigPanel
               target={panelTarget}
               nodes={nodes}
+              edges={edges}
               refs={refs}
               onNodeConfig={updateNodeConfig}
               onRequestNodeDelete={setConfirmDeleteId}
