@@ -249,5 +249,6 @@ per-provider rate limits.
 - 2026-11-01: phase 2 done: `agentkit/sandbox/jsrun` + `run_js` tool (qjs vendored and patched: no host FS,
   ctx-aware sleep, bridge leak fixes). Tests pass with `-race`. Not wired into agents yet. See docs/backend.sandbox.md.
 - 2026-11-02: `qjs.wasm` rebuilt from pinned sources (`internal/qjs/build/build.sh`, zig) with QuickJS' stack check
-  patched back in and a 1 MiB stack: deep recursion now throws a catchable RangeError (~3300 plain frames) instead
-  of crashing the engine. Speed and memory are the same as upstream's binary.
+  patched back in and a 256 KiB stack: recursion past the limit throws a catchable RangeError instead of crashing
+  the engine. `Config.StackLimit` default 32 KiB ≈ 100 nested calls (util-sized), max 128 KiB. Speed and memory
+  are the same as upstream's binary.

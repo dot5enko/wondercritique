@@ -74,27 +74,35 @@ t := jsrun.NewTool(r, fsys)                 // tool "run_js", input {"code": "..
 | `MaxResult` | 32 KiB | JSON result. Larger → `result` error. The length is checked before copying out of the guest. |
 | `MaxCodeSize` | 256 KiB | Source size. |
 | `MaxConcurrent` | 4 | Semaphore. Extra runs wait, and a ctx that ends while waiting returns `ctx.Err()`. |
+| `StackLimit` | 32 KiB | Engine stack for JS (≈100 nested calls). Clamped to [32 KiB, 128 KiB]; the minimum is what the prelude needs to serialize a 64-level result. Passed as `qjs.Option.MaxStackSize`. |
 
 - The wasm linear memory is hard-capped at 2048 pages (128 MiB) per instance. `init` sets `qjs.MaxMemoryPages`.
-- **Recursion**: 1 MiB guest stack. Running out throws a catchable `RangeError: Maximum call stack size exceeded`
-  (→ `exception` if uncaught). The script can catch it and continue, and the runner is unaffected.
-  Measured depth (2026-11-02):
+- **Recursion**: sized for util-style code. Exceeding `StackLimit` throws a catchable
+  `RangeError: Maximum call stack size exceeded` (→ `exception` if uncaught). The script can catch it and continue,
+  and the runner is unaffected. The limit is in bytes, so the depth depends on the frame. Measured (2026-11-02):
 
-  | Pattern | Max depth |
-  |---|---|
-  | plain call | ~3370 |
-  | getter | ~3015 |
-  | Proxy trap | ~2290 |
-  | async/await | ~1640 |
-  | `.map` callback | ~1430 |
-  | `toString` | ~880 |
-  | `sort` comparator | ~590 |
+  | Pattern | 32 KiB (default) | 128 KiB (max) |
+  |---|---|---|
+  | plain `f()` | 117 | 478 |
+  | function with 3 args + locals | 100 | 407 |
+  | tree walk (`for…of` over children) | 95 | 387 |
+  | method / getter | 105 | 428 |
+  | async/await | 57 | 233 |
+  | `.map(f)` callback | 50 | 203 |
+  | `.forEach(() => f())` | 35 | 143 |
+  | `sort` comparator | 21 | 84 |
+  | nested parens / arrays in source | 87 | 366 |
+  | nested arrow functions in source | 56 | 237 |
+  | `JSON.parse` nesting | ~1900 | 5000+ |
 
-  `JSON.parse` of 100k `[` and parsing 100k nested parens also throw RangeError. Full-depth recursion costs
-  ~30 MiB of transient Go memory (wazero's native stack); a trivial run costs ~4 MiB.
+  At 32 KiB these still work: a 60k-element spread or `apply`, sorting 50k elements, `Promise.all` over 2000
+  promises, regex replace with callbacks, 30-level `input`, 64-level results, and `console.log` of a 16-level
+  object from 60 calls deep. The tool description gives the approximate depth (`approxDepth`: limit/330 calls,
+  limit/650 through callbacks). A runaway recursion run allocates ~4 MiB of Go memory, about the same as a
+  trivial run (~3.3 MiB).
   Why a rebuild was needed: upstream's `qjs.wasm` compiled QuickJS' stack check out for WASI and had a 64 KiB
   stack above static data, so overflow corrupted the instance at ~200 frames. Our build (`internal/qjs/build/`)
-  patches the check back in and links a 1 MiB stack at the bottom of memory (see "Vendored qjs" below).
+  patches the check back in and links a 256 KiB stack at the bottom of memory (see "Vendored qjs" below).
 - **Timings**: the first instance in a process takes ~300 ms (wasm compile). Later runs take ~8 ms because they
   reuse the shared compilation cache. `Runner.Warmup(ctx)` pays the compile cost up front.
 
@@ -190,9 +198,10 @@ every patched spot carries a `vendor patch` comment. Summary:
   `wasi-sdk-21` dlmalloc. Differences from upstream's binary:
   - `build/quickjs-wasi-stack.patch`: stack limit = `max(stack_top - MaxStackSize, __stack_low + STACK_RESERVE)`,
     with default stack size 0 (= as deep as the stack allows). `qjs.Option.MaxStackSize` works, but can only lower it.
-  - `STACK_SIZE` 1 MiB at the bottom of linear memory (stack-first), of which `STACK_RESERVE` 128 KiB is kept for C
-    code that runs between checks. 2 MiB was rejected: wazero's native stack reached ~100 MiB transient at full depth,
-    close to its ~50 MB trap.
+  - `STACK_SIZE` 256 KiB at the bottom of linear memory (stack-first), of which `STACK_RESERVE` 128 KiB is kept for C
+    code that runs between checks, so JS gets at most 128 KiB (= `jsrun.MaxStackLimit`). The stack is part of every
+    instance's memory: 1 MiB cost ~1.1 MiB more Go allocation per run. Full-depth recursion costs ~30 MiB of
+    transient Go memory per MiB of guest stack (wazero's native stack, which traps at ~50 MB).
   - WASI reactor: `runtime.go` starts the module with `_initialize`, and `Option.StartFunctionName` was removed.
   - dlmalloc is linked first, replacing zig's emmalloc (~20% slower, ~25% more memory). Speed and memory match
     upstream's binary. No `wasm-opt` pass.
@@ -207,7 +216,8 @@ From `apps/backend/agentkit` run `go test -race ./sandbox/...`. This takes ~25 s
 - `jsrun_test.go` covers:
   - values, depth caps, globals, no host access;
   - console, output truncation, result limit;
-  - exceptions, timeouts (loops, sleeps, timers, never-settling promises), memory, recursion (RangeError for every pattern, catchable, runner stays usable), exit;
+  - exceptions, timeouts (loops, sleeps, timers, never-settling promises), memory, recursion (default depth ~100, `StackLimit` raise and clamps, RangeError for every
+    pattern, catchable, runner stays usable), exit;
   - input, invalid requests, caller ctx;
   - concurrency;
   - host-call leak (`TestHostCallsDoNotLeak`);

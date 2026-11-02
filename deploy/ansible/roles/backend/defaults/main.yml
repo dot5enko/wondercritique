@@ -19,6 +19,9 @@ backend_port: 11111
 backend_http_addr: "127.0.0.1:{{ backend_port }}"
 backend_db_path: "{{ backend_state_dir }}/app.db"
 backend_jwt_issuer: wonder-critique
+# upserted as admin users at backend startup (ADMIN_EMAILS)
+backend_admin_emails:
+  - sergiydotsenko@gmail.com
 backend_agent_model: muse-spark-1.3-contributor
 
 # Source tree to build. Default = sibling of this deploy directory.

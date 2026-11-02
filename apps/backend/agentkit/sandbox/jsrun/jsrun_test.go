@@ -100,8 +100,8 @@ func TestDeepValueIsCapped(t *testing.T) {
 	// most of the engine's stack to the user's code.
 	res = runCode(t, `let v = {}; const root = v; for (let i = 0; i < 1000; i++) { v.c = {}; v = v.c }
 		function deep(n) { if (n === 0) { console.log(root); return 0 } return 1 + deep(n - 1) }
-		deep(150)`)
-	wantValue(t, res, `150`)
+		deep(60)`)
+	wantValue(t, res, `60`)
 	if !strings.Contains(res.Output, `"[Object]"`) || strings.Count(res.Output, `"c"`) != 16 {
 		t.Fatalf("console output not capped at depth 16: %.200s", res.Output)
 	}
@@ -267,9 +267,27 @@ func TestMemoryLimit(t *testing.T) {
 
 func TestRecursion(t *testing.T) {
 	r := New(Config{})
-	// Moderately deep recursion works, directly and through native callbacks.
-	wantValue(t, run(t, r, Request{Code: `function f(n) { return n === 0 ? 0 : 1 + f(n - 1) } f(2000)`}), `2000`)
-	wantValue(t, run(t, r, Request{Code: `function f(n) { return n === 0 ? 0 : [n].map(() => 1 + f(n - 1))[0] } f(500)`}), `500`)
+	// The default limit fits util-sized recursion, directly and through native callbacks...
+	wantValue(t, run(t, r, Request{Code: `function f(n) { return n === 0 ? 0 : 1 + f(n - 1) } f(90)`}), `90`)
+	wantValue(t, run(t, r, Request{Code: `function f(n) { return n === 0 ? 0 : [n - 1].map(f)[0] + 1 } f(40)`}), `40`)
+	wantValue(t, run(t, r, Request{Code: `function f(n) { return n === 0 ? 0 : [n].map(() => 1 + f(n - 1))[0] } f(25)`}), `25`)
+	// ...and not much more.
+	const depth = `let d = 0; function r() { d++; r() } try { r() } catch (e) {} d`
+	res := run(t, r, Request{Code: depth})
+	if res.Error != nil || len(res.Value) == 0 {
+		t.Fatalf("depth probe: %+v", res.Error)
+	}
+	var d int
+	if err := json.Unmarshal(res.Value, &d); err != nil || d < 90 || d > 150 {
+		t.Fatalf("default max depth = %s, want ~100", res.Value)
+	}
+	// StackLimit raises it, up to MaxStackLimit, and is clamped at both ends.
+	wantValue(t, run(t, New(Config{StackLimit: MaxStackLimit}), Request{Code: `function f(n) { return n === 0 ? 0 : 1 + f(n - 1) } f(300)`}), `300`)
+	for in, want := range map[int]int{0: DefaultStackLimit, 1: MinStackLimit, 1 << 30: MaxStackLimit} {
+		if got := New(Config{StackLimit: in}).Config().StackLimit; got != want {
+			t.Fatalf("StackLimit %d → %d, want %d", in, got, want)
+		}
+	}
 
 	// Runaway recursion throws an ordinary RangeError, however it recurses.
 	const overflow = "RangeError: Maximum call stack size exceeded"
@@ -288,9 +306,9 @@ func TestRecursion(t *testing.T) {
 	}
 
 	// It can be caught, and the script carries on.
-	res := run(t, r, Request{Code: `let d = 0; function r() { d++; r() }
+	res = run(t, r, Request{Code: `let d = 0; function r() { d++; r() }
 		let msg; try { r() } catch (e) { msg = String(e) }
-		[d > 1000, msg, [1, 2, 3].map(x => x * 2)]`})
+		[d > 50, msg, [1, 2, 3].map(x => x * 2)]`})
 	wantValue(t, res, `[true,"`+overflow+`",[2,4,6]]`)
 
 	// The runner stays usable afterwards.

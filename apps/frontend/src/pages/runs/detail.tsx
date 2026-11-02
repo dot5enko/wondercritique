@@ -58,7 +58,7 @@ function upsertStep(
   return { ...run, steps }
 }
 
-function applyRunEvent(run: Run, ev: RunEvent): Run {
+export function applyRunEvent(run: Run, ev: RunEvent): Run {
   switch (ev.event) {
     case 'step_started':
       return upsertStep(run, ev.iteration, ev.node_id, { status: 'running', error: null })
@@ -90,6 +90,11 @@ function applyRunEvent(run: Run, ev: RunEvent): Run {
 
 export default function RunDetailPage() {
   const { id = '' } = useParams()
+  return <RunDetailView runId={id} />
+}
+
+/** The whole run detail UI, parameterized by run id so the chat can embed it in a drawer. */
+export function RunDetailView({ runId: id }: { runId: string }) {
   const runQ = useAsync((signal) => getRun(id, signal), [id])
   const { data: run, setData, reload } = runQ
 
@@ -312,7 +317,7 @@ export default function RunDetailPage() {
   return (
     <div className="p-5">
       <PageHeader
-        back={{ to: '/runs', label: 'Runs' }}
+        back={{ to: '/chat', label: 'Design chat' }}
         title={
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="truncate">{run?.pipeline.name ?? 'Run'}</span>

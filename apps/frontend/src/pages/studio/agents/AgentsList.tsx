@@ -3,9 +3,11 @@
  * name, slug, description, latest published version, last draft update.
  */
 import { useState } from 'react'
-import { Bot } from 'lucide-react'
-import { Badge, Tooltip } from '../../../ui'
-import { ErrorState, ListPage, absoluteTime, relativeTime } from '../../../components'
+import { useNavigate } from 'react-router'
+import { Bot, MessageSquare } from 'lucide-react'
+import { Badge, Button, Tooltip } from '../../../ui'
+import { Callout } from '../../../ui/Display'
+import { ErrorState, ListPage, absoluteTime, isBackendMissing, relativeTime } from '../../../components'
 import { useAsync } from '../../../hooks'
 import { listDefs, type StudioDef } from '../../../api/studio'
 import { NewAgentModal } from './NewAgentModal'
@@ -13,16 +15,26 @@ import { NewAgentModal } from './NewAgentModal'
 export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => void }) {
   const defs = useAsync((signal) => listDefs('agent', undefined, signal), [])
   const [createOpen, setCreateOpen] = useState(false)
+  const navigate = useNavigate()
 
   return (
     <div className="mx-auto w-full max-w-6xl p-5">
       {defs.error != null && defs.data == null ? (
-        <ErrorState error={defs.error} onRetry={defs.reload} />
+        isBackendMissing(defs.error) ? (
+          <Callout tone="warning" title="The studio backend isn't available yet">
+            <p className="mt-1 text-sm">
+              Agents can't be loaded or saved yet — the studio API hasn't been built.
+            </p>
+            {defs.error instanceof Error && <p className="mt-1 font-mono text-2xs text-ink-3">{defs.error.message}</p>}
+          </Callout>
+        ) : (
+          <ErrorState error={defs.error} onRetry={defs.reload} />
+        )
       ) : (
         <>
           <ListPage<StudioDef<'agent'>>
             title="Agents"
-            description="Reusable agents: prompts, model sets, tools and output contracts."
+            description="Agents are the workers a pipeline calls: their instructions, tools, skills and model live here. Pipelines decide when each one runs."
             newButton={{ label: 'New agent', onClick: () => setCreateOpen(true) }}
             searchPlaceholder="Search agents…"
             columns={[
@@ -64,6 +76,25 @@ export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => vo
                     <span className="cursor-default">{relativeTime(d.draft_updated_at)}</span>
                   </Tooltip>
                 ),
+              },
+              {
+                key: 'chat',
+                header: '',
+                width: 'w-20',
+                render: (d) =>
+                  d.latest_version != null ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<MessageSquare />}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigate(`/agent-chat?agent=${d.slug}`)
+                      }}
+                    >
+                      Chat
+                    </Button>
+                  ) : null,
               },
             ]}
             rows={defs.data?.items}

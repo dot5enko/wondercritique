@@ -29,6 +29,7 @@ var Module = fx.Module("auth",
 		NewService,
 		mailer.New,
 	),
+	fx.Invoke(bootstrapAdmins), // runs after dbx's migrate invoke (dbx.Module is registered first)
 	AsProvider(newEmailCodeProvider),
 	httpx.AsController(NewController),
 )

@@ -20,7 +20,7 @@ func TestToolSpec(t *testing.T) {
 	if spec.Name != "run_js" {
 		t.Fatalf("name = %q", spec.Name)
 	}
-	for _, part := range []string{"5s wall time", "64 MiB memory", "32 KiB console output", "fs.read(path)", "EROFS"} {
+	for _, part := range []string{"5s wall time", "64 MiB memory", "32 KiB console output", "about 100 calls (about 50 through callbacks", "fs.read(path)", "EROFS"} {
 		if !strings.Contains(spec.Description, part) {
 			t.Errorf("description lacks %q:\n%s", part, spec.Description)
 		}

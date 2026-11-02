@@ -1,556 +1,491 @@
 /**
- * Chat — talk to any published agent (plan.critique-engine.md §6: the generic
- * `/api/v1/agents/{slug}/…` httpapi surface replaces the demo critic).
+ * Design chat — every chat is a pipeline run (product flow: the user writes
+ * what they want designed → the pipeline generates HTML, renders it, a critic
+ * reviews it and the gate decides whether to regenerate). The thread shows
+ * each run live (RunCard); "Details" opens the full run view in a drawer.
  *
- * Two-pane layout like the shell: session rail (w-64, sunken) on the left,
- * thread + composer on the right. The agent comes from `?agent=<slug>`
- * (default `critic`); admins pick from published Studio defs, everyone else
- * types a slug. Runs stream over SSE: text/reasoning deltas, tool rows and
- * the run outcome are folded into the transcript live.
+ * A chat = a thread of runs: the first message starts run #1 (its id becomes
+ * the thread id); follow-up messages start a new run with `thread_id` so the
+ * engine can feed previous context (ASSUMPTION in api/runs.ts).
+ *
+ * The runs/studio backend does not exist yet — until it does, API failures
+ * surface as a clear "backend isn't available yet" state instead of crashes.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { Bot, MessageSquare, Plus, RotateCw, X } from 'lucide-react'
-import {
-  ApiError,
-  cancelAgentRun,
-  createAgentSession,
-  deleteAgentSession,
-  getAgentSession,
-  listAgentSessions,
-  listDefs,
-  runAgent,
-  type AgentRunEvent,
-  type AgentSession,
-} from '../../api'
-import { Button, Callout, EmptyState, IconButton, Skeleton } from '../../ui'
-import { ConfirmDialog, ErrorState, absoluteTime, relativeTime } from '../../components'
+import { ArrowUp, MessageSquareDashed, Square, X } from 'lucide-react'
+import { Button, IconButton, Input, Select, Textarea } from '../../ui'
+import { Badge, Callout, EmptyState, Skeleton } from '../../ui/Display'
+import { Field } from '../../ui/Form'
+import { ErrorState, isBackendMissing, relativeTime } from '../../components'
 import { useAsync } from '../../hooks'
-import { useAuth } from '../../features/auth'
-import { SessionRail } from './rail'
-import { Composer } from './composer'
-import { TranscriptList } from './thread'
 import {
-  applyEvent,
-  emptyLiveTurn,
-  entryFromLive,
-  hasVisibleContent,
-  userEntry,
-  type ChatEntry,
-  type LiveTurn,
-} from './run'
+  cancelRun,
+  isTerminalRunStatus,
+  listRuns,
+  startRun,
+  type RunInputValue,
+  type RunStatus,
+} from '../../api/runs'
+import { getDef, getVersion, listDefs, type PipelineBody } from '../../api/studio'
+import { groupThreads, ThreadRail } from './rail'
+import { RunCard } from './RunCard'
+import { parseInputFields } from '../runs/NewRunModal'
+import { RunDetailView } from '../runs/detail'
 
-type HistoryState = 'idle' | 'loading' | 'ready' | 'error'
+/** One timeline entry of the active thread. */
+type Entry = { kind: 'user'; text: string; at: string } | { kind: 'run'; runId: string }
 
-/** Guard object created per run — post-run side effects apply only while it is still current. */
-interface RunCtx {
-  slug: string
-  sessionId: string
-}
+const EXAMPLES = [
+  'A pricing section with three tiers, dark theme, rounded cards',
+  'A hero for a hiking app: big headline, photo background, CTA button',
+  'A user profile card with avatar, stats and a follow button',
+]
 
-function isAbortError(err: unknown): boolean {
-  return err instanceof DOMException && err.name === 'AbortError'
-}
+const LAST_PIPELINE_KEY = 'wc_chat_pipeline'
 
 export default function ChatPage() {
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
-  const [searchParams, setSearchParams] = useSearchParams()
-  const slug = (searchParams.get('agent') ?? 'critic').trim() || 'critic'
+  const [params, setSearchParams] = useSearchParams()
+  const threadId = params.get('thread')
 
-  /* ---------- agent defs (admin picker; falls back to a slug input) ---------- */
-  const defs = useAsync(async (signal) => {
-    if (!isAdmin) return null
-    try {
-      const res = await listDefs('agent', { limit: 100 }, signal)
-      // Chat resolves published agents only — hide drafts/archived defs.
-      const published = res.items.filter((d) => !d.archived && d.latest_version != null)
-      return published.length > 0 ? published : null
-    } catch {
-      return null // studio endpoints missing / not an admin → slug input
-    }
-  }, [isAdmin])
-  const agentName = useMemo(() => defs.data?.find((d) => d.slug === slug)?.name ?? null, [defs.data, slug])
+  /* ---------- thread rail ---------- */
 
-  /* ---------- sessions ---------- */
-  const sessions = useAsync((signal) => listAgentSessions(slug, { limit: 50 }, signal), [slug])
-  const sortedSessions = useMemo(() => {
-    const list = [...(sessions.data?.sessions ?? [])]
-    list.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0))
-    return list
-  }, [sessions.data])
+  const threadsQ = useAsync((signal) => listRuns({ limit: 100 }, signal), [])
+  const threads = useMemo(() => groupThreads(threadsQ.data?.items ?? []), [threadsQ.data])
+  const backendMissing = threadsQ.error != null && isBackendMissing(threadsQ.error)
 
-  const mutateSessions = useCallback(
-    (fn: (list: AgentSession[]) => AgentSession[]) => {
-      sessions.setData((prev) => (prev ? { ...prev, sessions: fn(prev.sessions) } : prev))
-    },
-    [sessions.setData],
-  )
+  /* ---------- active thread timeline ---------- */
 
-  /* ---------- selection + history ---------- */
-  // The active session lives in the URL (`?id=`) so a refresh reopens the same chat.
-  const activeId = searchParams.get('id')
-  const setActiveId = useCallback(
-    (id: string | null) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev)
-          if (id) next.set('id', id)
-          else next.delete('id')
-          return next
-        },
-        { replace: true },
-      )
-    },
-    [setSearchParams],
-  )
-  const [entries, setEntries] = useState<ChatEntry[]>([])
-  const [historyState, setHistoryState] = useState<HistoryState>('idle')
-  const [historyError, setHistoryError] = useState<unknown>(null)
-  const [historyEpoch, setHistoryEpoch] = useState(0)
-  const reloadHistory = useCallback(() => setHistoryEpoch((e) => e + 1), [])
+  const [entries, setEntries] = useState<Entry[]>([])
+  const [threadError, setThreadError] = useState<unknown>(null)
+  const [threadLoading, setThreadLoading] = useState(false)
 
-  /* ---------- auto-scroll (sticky bottom unless the user scrolled up) ---------- */
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const pinnedRef = useRef(true)
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
-  }, [])
-
-  /* ---------- live run state ---------- */
-  const liveRef = useRef<LiveTurn | null>(null)
-  const [live, setLive] = useState<LiveTurn | null>(null)
-  const ctrlRef = useRef<AbortController | null>(null)
-  const ctxRef = useRef<RunCtx | null>(null)
-  const streamingRef = useRef(false)
-  const [streaming, setStreaming] = useState(false)
-  const lastInputRef = useRef<string | null>(null)
-
-  /* ---------- composer + notices ---------- */
-  const [text, setText] = useState('')
-  const [busyNotice, setBusyNotice] = useState(false)
-  const [startError, setStartError] = useState<string | null>(null)
-
-  /* ---------- rail actions ---------- */
-  const [creating, setCreating] = useState(false)
-  const [railError, setRailError] = useState<string | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<AgentSession | null>(null)
-  const [deleting, setDeleting] = useState(false)
-
-  const activeSession = useMemo(() => sortedSessions.find((s) => s.id === activeId) ?? null, [sortedSessions, activeId])
-
-  const resetRun = useCallback(() => {
-    ctrlRef.current?.abort()
-    ctrlRef.current = null
-    ctxRef.current = null
-    liveRef.current = null
-    setLive(null)
-    streamingRef.current = false
-    setStreaming(false)
-    setBusyNotice(false)
-    setStartError(null)
-  }, [])
-
-  // Switching agent drops the session/run state — switching sessions is handled below.
-  // Guarded by prevSlugRef so it doesn't clear the deep-linked `?id=` on first mount.
-  const prevSlugRef = useRef(slug)
-  useEffect(() => {
-    if (prevSlugRef.current === slug) return
-    prevSlugRef.current = slug
-    resetRun()
-    setActiveId(null)
-    setText('')
-    sessions.setData(null) // don't show the previous agent's sessions while loading
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, resetRun, setActiveId])
-
-  // Selecting another session aborts the in-flight run (a client disconnect
-  // cancels the run server-side) and clears live/notices for the new context.
-  useEffect(() => {
-    resetRun()
-  }, [activeId, resetRun])
-
-  // Load the selected session's history. Replaces the local transcript wholesale.
-  useEffect(() => {
-    pinnedRef.current = true // opening a session lands on the latest messages
-    if (!activeId) {
-      setEntries([])
-      setHistoryState('idle')
-      setHistoryError(null)
-      return
-    }
-    const ctrl = new AbortController()
-    let alive = true
-    setHistoryState('loading')
-    setHistoryError(null)
-    setEntries([])
-    getAgentSession(slug, activeId, ctrl.signal).then(
-      (res) => {
-        if (!alive) return
-        setEntries(res.messages.map((msg) => ({ msg })))
-        setHistoryState('ready')
-      },
-      (err: unknown) => {
-        if (!alive || ctrl.signal.aborted) return
-        setHistoryError(err)
-        setHistoryState('error')
-      },
-    )
-    return () => {
-      alive = false
-      ctrl.abort()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, activeId, historyEpoch])
-
-  // Abort any in-flight run on unmount (a client disconnect cancels the run server-side).
-  useEffect(
-    () => () => {
-      ctrlRef.current?.abort()
-      ctxRef.current = null
+  const loadThread = useCallback(
+    async (id: string, signal?: AbortSignal): Promise<void> => {
+      setThreadLoading(true)
+      setThreadError(null)
+      try {
+        const res = await listRuns({ filter: { thread_id: id }, limit: 100 }, signal)
+        const runs = [...res.items].sort((a, b) => a.created_at.localeCompare(b.created_at))
+        const next: Entry[] = []
+        for (const r of runs) {
+          const brief = r.input?.['brief']
+          next.push({ kind: 'user', text: typeof brief === 'string' && brief ? brief : '(message)', at: r.created_at })
+          next.push({ kind: 'run', runId: r.id })
+        }
+        if (!signal?.aborted) setEntries(next)
+      } catch (err: unknown) {
+        if (!signal?.aborted) setThreadError(err)
+      } finally {
+        if (!signal?.aborted) setThreadLoading(false)
+      }
     },
     [],
   )
 
-  useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
-  }, [entries, live, historyState, activeId])
+  useEffect(() => {
+    setEntries([])
+    setRunStatuses({})
+    if (!threadId) return
+    const ctrl = new AbortController()
+    void loadThread(threadId, ctrl.signal)
+    return () => ctrl.abort()
+  }, [threadId, loadThread])
 
-  /* ---------- session rail actions ---------- */
-  const createSession = useCallback(async () => {
-    setRailError(null)
-    setCreating(true)
-    try {
-      const s = await createAgentSession(slug, { title: '' })
-      mutateSessions((list) => [s, ...list.filter((x) => x.id !== s.id)])
-      setActiveId(s.id)
-    } catch (err) {
-      setRailError(err instanceof Error ? err.message : 'Could not create the session.')
-    } finally {
-      setCreating(false)
-    }
-  }, [slug, mutateSessions])
+  /* ---------- live statuses (reported up by mounted RunCards) ---------- */
 
-  const confirmDelete = useCallback(async () => {
-    const target = deleteTarget
-    if (!target) return
-    setDeleting(true)
-    setRailError(null)
-    try {
-      await deleteAgentSession(slug, target.id)
-      mutateSessions((list) => list.filter((s) => s.id !== target.id))
-      if (activeId === target.id) setActiveId(null)
-      setDeleteTarget(null)
-    } catch (err) {
-      setRailError(err instanceof Error ? err.message : 'Could not delete the session.')
-      setDeleteTarget(null)
-    } finally {
-      setDeleting(false)
-    }
-  }, [slug, deleteTarget, activeId, mutateSessions])
-
-  const changeSlug = useCallback(
-    (next: string) => {
-      if (!next || next === slug) return
-      setSearchParams({ agent: next }, { replace: true })
-    },
-    [slug, setSearchParams],
-  )
-
-  /* ---------- runs ---------- */
-  const touchSession = useCallback(
-    (sessionId: string) => {
-      mutateSessions((list) =>
-        list.map((s) => (s.id === sessionId ? { ...s, updated_at: new Date().toISOString() } : s)),
-      )
-    },
-    [mutateSessions],
-  )
-
-  const finalizeTurn = useCallback((interrupted: boolean, failed: string | undefined, input: string | undefined) => {
-    const finished = liveRef.current
-    liveRef.current = null
-    setLive(null)
-    if (!finished) return
-    const failedMsg = failed ?? finished.failed ?? undefined
-    if (!hasVisibleContent(finished) && !failedMsg) return
-    // The failure callout already explains the truncation — no extra "stopped" note.
-    setEntries((prev) => [...prev, entryFromLive(finished, { interrupted: interrupted && !failedMsg, failed: failedMsg, input })])
+  const [runStatuses, setRunStatuses] = useState<Record<string, RunStatus>>({})
+  const reportStatus = useCallback((id: string, status: RunStatus) => {
+    setRunStatuses((prev) => (prev[id] === status ? prev : { ...prev, [id]: status }))
   }, [])
 
-  const renameSession = useCallback(
-    (sessionId: string, input: string) => {
-      const title = input.length > 60 ? `${input.slice(0, 60)}…` : input
-      mutateSessions((list) => list.map((s) => (s.id === sessionId ? { ...s, title } : s)))
-    },
-    [mutateSessions],
-  )
+  const lastRunId = useMemo(() => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i]
+      if (e.kind === 'run') return e.runId
+    }
+    return null
+  }, [entries])
+  const busy = lastRunId != null && !isTerminalRunStatus(runStatuses[lastRunId] ?? 'running')
 
-  const runTurn = useCallback(
-    (input: string, opts: { appendUser: boolean }) => {
-      const sessionId = activeId
-      if (!sessionId || ctrlRef.current) return
-      setBusyNotice(false)
-      setStartError(null)
-      const ctx: RunCtx = { slug, sessionId }
-      ctxRef.current = ctx
-
-      // Optimistic user bubble. A busy (409) or failed start rolls it back —
-      // the run never started, so nothing was persisted server-side.
-      let appended: ChatEntry | null = null
-      if (opts.appendUser) {
-        const entry = userEntry(input)
-        appended = entry
-        setEntries((prev) => [...prev, entry])
-      }
-      // First user message names the session locally (httpapi has no title-update
-      // endpoint, so the rename lives in the rail list only).
-      if (activeSession && !activeSession.title && !entries.some((e) => e.msg.message.role === 'user')) {
-        renameSession(sessionId, input)
-      }
-
-      const live0 = emptyLiveTurn()
-      liveRef.current = live0
-      setLive(live0)
-      lastInputRef.current = input
-
-      const ctrl = new AbortController()
-      ctrlRef.current = ctrl
-      streamingRef.current = true
-      setStreaming(true)
-      let gotEvent = false
-      let sawTerminal = false
-
-      runAgent(slug, sessionId, { input }, {
-        signal: ctrl.signal,
-        onEvent: (ev: AgentRunEvent) => {
-          gotEvent = true
-          if (ev.type === 'run_finished' || ev.type === 'run_failed') sawTerminal = true
-          const cur = liveRef.current
-          if (!cur) return
-          const next = applyEvent(cur, ev)
-          liveRef.current = next
-          setLive(next)
-        },
-      }).then(
-        () => {
-          if (ctxRef.current !== ctx) return
-          // Stream closed without a terminal event (dropped/crashed) → interrupted.
-          finalizeTurn(!sawTerminal, undefined, input)
-        },
-        (err: unknown) => {
-          if (ctxRef.current !== ctx) return
-          if (isAbortError(err)) {
-            // Stop button / session switch — keep whatever streamed so far.
-            finalizeTurn(true, undefined, input)
-            return
-          }
-          if (!gotEvent) {
-            if (appended) {
-              const dropped = appended
-              setEntries((prev) => prev.filter((e) => e.msg.id !== dropped.msg.id))
-            }
-            liveRef.current = null
-            setLive(null)
-            setText((prev) => prev || input)
-            if (err instanceof ApiError && err.status === 409) setBusyNotice(true)
-            else setStartError(err instanceof Error ? err.message : 'Could not start the run.')
-          } else {
-            finalizeTurn(false, err instanceof Error ? err.message : 'The run failed unexpectedly.', input)
-          }
-        },
-      ).finally(() => {
-        if (ctxRef.current !== ctx) return
-        ctxRef.current = null
-        ctrlRef.current = null
-        streamingRef.current = false
-        setStreaming(false)
-        touchSession(sessionId)
-      })
-    },
+  // Rail mirrors status changes (e.g. a run finishing) without polling.
+  const anyTerminal = Object.values(runStatuses).some((s) => isTerminalRunStatus(s))
+  useEffect(() => {
+    if (anyTerminal) threadsQ.reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [slug, activeId, activeSession, entries, finalizeTurn, touchSession],
+  }, [anyTerminal])
+
+  /* ---------- pipeline picker (new chats) ---------- */
+
+  const pipelinesQ = useAsync((signal) => listDefs('pipeline', { limit: 100 }, signal), [])
+  const pipelines = useMemo(
+    () => (pipelinesQ.data?.items ?? []).filter((d) => d.latest_version != null),
+    [pipelinesQ.data],
   )
+  const pipelinesUnavailable = pipelinesQ.error != null // 403 for non-admins, or missing backend
 
-  const send = useCallback(() => {
-    const input = text.trim()
-    if (!input || !activeId || streaming) return
-    setText('')
-    runTurn(input, { appendUser: true })
-  }, [text, activeId, streaming, runTurn])
+  const [pipelineId, setPipelineId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LAST_PIPELINE_KEY)
+    } catch {
+      return null
+    }
+  })
+  const effectivePipelineId = useMemo(() => {
+    if (pipelines.length === 0) return null
+    if (pipelineId && pipelines.some((p) => p.id === pipelineId)) return pipelineId
+    return pipelines.find((p) => p.slug === 'default')?.id ?? pipelines[0]?.id ?? null
+  }, [pipelines, pipelineId])
+  useEffect(() => {
+    if (effectivePipelineId) {
+      try {
+        localStorage.setItem(LAST_PIPELINE_KEY, effectivePipelineId)
+      } catch {
+        // private mode etc. — the picker still works
+      }
+    }
+  }, [effectivePipelineId])
 
-  const stop = useCallback(() => {
-    const ctrl = ctrlRef.current
-    const sessionId = activeId
-    if (!ctrl || !sessionId) return
-    // Best effort: the abort below also cancels the run (client disconnect).
-    void cancelAgentRun(slug, sessionId).catch(() => {})
-    ctrl.abort()
-  }, [slug, activeId])
-
-  /** Re-run a failed turn. `entryInput` identifies the failed entry's input; undefined = the live turn (current run). */
-  const retryFrom = useCallback(
-    (entryInput: string | undefined) => {
-      const input = entryInput ?? lastInputRef.current
-      if (!input || !activeId || streaming) return
-      // The user message is already persisted — don't append it twice.
-      runTurn(input, { appendUser: false })
+  // Input fields of the pipeline the NEXT message will run: the selected one
+  // for a new chat, else the thread's pipeline (follow-ups keep it).
+  const threadPipelineId = useMemo(() => {
+    const first = threadsQ.data?.items.find((r) => (r.thread_id || r.id) === threadId)
+    return first?.pipeline.id ?? null
+  }, [threadsQ.data, threadId])
+  const fieldsPipelineId = threadId ? threadPipelineId : effectivePipelineId
+  const fieldsQ = useAsync(
+    async (signal): Promise<PipelineBody | null> => {
+      if (!fieldsPipelineId) return null
+      const def = (pipelinesQ.data?.items ?? []).find((d) => d.id === fieldsPipelineId)
+      if (def?.latest_version != null) {
+        const ver = await getVersion('pipeline', fieldsPipelineId, def.latest_version, signal).catch(() => null)
+        if (ver) return ver.body
+      }
+      const d = await getDef('pipeline', fieldsPipelineId, signal).catch(() => null)
+      return d?.draft ?? null
     },
-    [activeId, streaming, runTurn],
+    [fieldsPipelineId, pipelinesQ.data],
   )
+  const inputFields = useMemo(() => parseInputFields(fieldsQ.data), [fieldsQ.data])
+  const primaryField = inputFields.find((f) => (f.type ?? 'text').toLowerCase() !== 'image') ?? null
+  const extraFields = inputFields.filter((f) => f !== primaryField)
+  const requiredExtras = extraFields.filter((f) => f.required)
 
-  /** Re-send after a failed start (nothing was persisted). */
-  const retryStart = useCallback(() => {
-    const input = lastInputRef.current
-    if (!input || !activeId || streaming) return
-    setText((prev) => (prev.trim() === input ? '' : prev))
-    runTurn(input, { appendUser: true })
-  }, [activeId, streaming, runTurn])
+  /* ---------- composer ---------- */
 
-  const cancelRunning = useCallback(() => {
-    if (!activeId) return
-    void cancelAgentRun(slug, activeId)
-      .then(() => setBusyNotice(false))
-      .catch(() => {})
-  }, [slug, activeId])
+  const [text, setText] = useState('')
+  const [extras, setExtras] = useState<Record<string, string>>({})
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<unknown>(null)
+
+  const send = async (): Promise<void> => {
+    const brief = text.trim()
+    if (!brief || sending || busy) return
+    setSending(true)
+    setSendError(null)
+    try {
+      const input: Record<string, RunInputValue> = {}
+      if (primaryField) input[primaryField.name] = brief
+      else input['brief'] = brief
+      for (const f of extraFields) {
+        const v = (extras[f.name] ?? '').trim()
+        if (!v) continue
+        input[f.name] = (f.type ?? 'text').toLowerCase() === 'image' ? { artifact_id: v } : v
+      }
+      const res = await startRun({
+        input,
+        ...(threadId ? { thread_id: threadId } : {}),
+        ...(!threadId && effectivePipelineId ? { pipeline_id: effectivePipelineId } : {}),
+      })
+      setText('')
+      setExtras({})
+      if (!threadId) setSearchParams({ thread: res.id })
+      else void loadThread(threadId)
+      threadsQ.reload()
+    } catch (err: unknown) {
+      setSendError(err)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const stop = async (): Promise<void> => {
+    if (!lastRunId) return
+    try {
+      await cancelRun(lastRunId)
+    } catch {
+      // the RunCard stream/refresh will surface the outcome
+    }
+  }
+
+  /* ---------- misc ---------- */
+
+  const bottomRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [entries.length, threadId])
+
+  const openThread = (id: string): void => setSearchParams({ thread: id })
+  const newChat = (): void => {
+    setSendError(null)
+    setSearchParams({})
+  }
+  const activeThread = threads.find((t) => t.id === threadId) ?? null
+
+  const drawerRunId = params.get('run')
 
   /* ---------- render ---------- */
+
   return (
     <div className="flex h-full min-h-0">
-      <SessionRail
-        slug={slug}
-        defs={defs.data ?? null}
-        defsLoading={defs.loading && isAdmin}
-        sessions={sortedSessions}
-        sessionsLoading={sessions.loading && sessions.data === null}
-        sessionsError={sessions.error}
-        activeId={activeId}
-        creating={creating}
-        actionError={railError}
-        onSlugChange={changeSlug}
-        onNew={() => void createSession()}
-        onSelect={setActiveId}
-        onDeleteRequest={setDeleteTarget}
-        onRetrySessions={sessions.reload}
-      />
-
-      <section className="flex min-w-0 flex-1 flex-col bg-surface">
-        <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-surface px-4">
-          <Bot size={15} className="shrink-0 text-ink-3" />
-          <h2 className="text-sm font-semibold text-ink">{agentName ?? 'Chat'}</h2>
-          <span className="inline-flex items-center rounded border border-line bg-app px-1.5 py-px font-mono text-2xs text-ink-2">
-            {slug}
-          </span>
-          <span className="min-w-0 flex-1" />
-          {activeSession && (
-            <span
-              className="shrink-0 text-2xs text-ink-3"
-              title={absoluteTime(activeSession.updated_at)}
-            >
-              {relativeTime(activeSession.updated_at)}
-            </span>
-          )}
-        </header>
-
-        <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl px-4 py-4">
-            {!activeSession ? (
-              <EmptyState
-                icon={MessageSquare}
-                title="Start a new chat"
-                description="Pick a session on the left or create a new one."
-                action={
-                  <Button variant="primary" size="sm" icon={<Plus />} loading={creating} onClick={() => void createSession()}>
-                    New chat
-                  </Button>
-                }
-                className="mt-16"
-              />
-            ) : historyState === 'loading' ? (
-              <HistorySkeleton />
-            ) : historyError ? (
-              <ErrorState error={historyError} onRetry={reloadHistory} />
-            ) : entries.length === 0 && !live ? (
-              <EmptyState
-                icon={Bot}
-                title="Send the first message"
-                description={`Say something to ${agentName ?? slug} to start the conversation.`}
-                className="mt-16"
-              />
-            ) : (
-              <TranscriptList entries={entries} live={live} onRetry={retryFrom} />
+      {backendMissing ? (
+        <div className="flex min-w-0 flex-1 items-start justify-center p-6">
+          <Callout tone="warning" title="The runs backend isn't available yet" className="max-w-lg">
+            <p className="mt-1 text-sm">
+              Chats run pipelines through the runs API, which hasn't been built yet. Configure
+              agents and pipelines in the meantime — this screen lights up once the engine lands.
+            </p>
+            {threadsQ.error instanceof Error && (
+              <p className="mt-1 font-mono text-2xs text-ink-3">{threadsQ.error.message}</p>
             )}
-          </div>
+          </Callout>
         </div>
-
-        {(busyNotice || startError) && (
-          <div className="shrink-0 space-y-2 px-3 pt-2">
-            {busyNotice && (
-              <Callout tone="warning" className="pr-2">
-                <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1">Agent is busy — wait or cancel the running turn.</span>
-                  <Button size="sm" variant="secondary" className="shrink-0" onClick={cancelRunning}>
-                    Cancel running turn
-                  </Button>
-                  <IconButton icon={<X />} label="Dismiss" size="sm" className="shrink-0" onClick={() => setBusyNotice(false)} />
-                </div>
-              </Callout>
-            )}
-            {startError && (
-              <Callout tone="danger" title="Could not start the run" className="pr-2">
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="min-w-0 break-words">{startError}</span>
-                  <Button size="sm" variant="secondary" icon={<RotateCw />} className="shrink-0" onClick={retryStart}>
-                    Retry
-                  </Button>
-                  <IconButton icon={<X />} label="Dismiss" size="sm" className="shrink-0" onClick={() => setStartError(null)} />
-                </div>
-              </Callout>
-            )}
-          </div>
-        )}
-
-        {activeSession && (
-          <Composer
-            value={text}
-            onChange={setText}
-            onSend={send}
-            onStop={stop}
-            streaming={streaming}
-            disabled={historyState === 'loading'}
-            placeholder={`Message ${agentName ?? slug}…`}
+      ) : (
+        <>
+          <ThreadRail
+            threads={threads}
+            loading={threadsQ.loading}
+            error={threadsQ.error}
+            activeId={threadId}
+            creating={false}
+            onNew={newChat}
+            onSelect={openThread}
+            onRetry={() => threadsQ.reload()}
           />
-        )}
-      </section>
 
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        title="Delete session?"
-        body={`“${deleteTarget?.title || 'Untitled'}” and its messages will be removed. This cannot be undone.`}
-        confirmLabel="Delete"
-        danger
-        busy={deleting}
-        onConfirm={() => void confirmDelete()}
-      />
+          <div className="flex min-w-0 flex-1 flex-col">
+            {/* header */}
+            <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5">
+              <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+                {activeThread ? activeThread.title : 'Design chat'}
+              </p>
+              {activeThread && <Badge tone="neutral">{activeThread.runs} runs</Badge>}
+              {threadId && (
+                <Button size="sm" variant="secondary" onClick={newChat}>
+                  New chat
+                </Button>
+              )}
+            </div>
+
+            {/* timeline */}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-5">
+                {!threadId && (
+                  <div className="rounded-xl border border-line bg-surface p-5">
+                    <EmptyState
+                      icon={MessageSquareDashed}
+                      title="Describe what you want designed"
+                      description="Each chat runs the design pipeline: an agent generates the HTML, it gets rendered, a critic reviews it, and it regenerates until the score passes."
+                      className="py-2"
+                    />
+                    <div className="mt-2 flex flex-col gap-1.5">
+                      {EXAMPLES.map((ex) => (
+                        <button
+                          key={ex}
+                          type="button"
+                          onClick={() => setText(ex)}
+                          className="cursor-pointer rounded-lg border border-line bg-app px-3 py-2 text-left text-sm text-ink-2 outline-none transition duration-100 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/30"
+                        >
+                          {ex}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {threadId && threadLoading && (
+                  <div className="space-y-3">
+                    <Skeleton className="h-16" />
+                    <Skeleton className="h-48" />
+                  </div>
+                )}
+                {threadId && !threadLoading && threadError != null && (
+                  threadError != null && isBackendMissing(threadError) ? (
+                    <Callout tone="warning" title="The runs backend isn't available yet">
+                      This chat's history lives in the runs API, which hasn't been built yet.
+                    </Callout>
+                  ) : (
+                    <ErrorState error={threadError} onRetry={() => threadId && void loadThread(threadId)} />
+                  )
+                )}
+
+                {entries.map((e, i) =>
+                  e.kind === 'user' ? (
+                    <div key={`${i}-user`} className="flex justify-end">
+                      <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-accent-soft px-3.5 py-2.5 text-sm whitespace-pre-wrap text-ink">
+                        {e.text}
+                        <span className="mt-0.5 block text-right text-2xs text-accent-ink/70">{relativeTime(e.at)}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <RunCard
+                      key={`${i}-${e.runId}`}
+                      runId={e.runId}
+                      onStatus={reportStatus}
+                      onOpenDetails={() => setSearchParams((prev) => {
+                        const next = new URLSearchParams(prev)
+                        next.set('run', e.runId)
+                        return next
+                      })}
+                      onRetry={
+                        threadId
+                          ? () => {
+                              // the user message right before this run card
+                              const prev = entries[i - 1]
+                              void resend(prev && prev.kind === 'user' ? prev.text : '')
+                            }
+                          : undefined
+                      }
+                    />
+                  ),
+                )}
+
+                <div ref={bottomRef} />
+              </div>
+            </div>
+
+            {/* composer */}
+            <div className="border-t border-line bg-surface">
+              <div className="mx-auto flex max-w-3xl flex-col gap-2 px-4 py-3">
+                {sendError != null && (
+                  isBackendMissing(sendError) ? (
+                    <Callout tone="warning" title="The runs backend isn't available yet">
+                      Runs can't start until the engine is built.
+                    </Callout>
+                  ) : (
+                    <Callout tone="danger" title="Couldn't start the run">
+                      {sendError instanceof Error ? sendError.message : 'Something went wrong.'}
+                    </Callout>
+                  )
+                )}
+
+                {!threadId && !pipelinesUnavailable && pipelines.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xs whitespace-nowrap text-ink-3">Pipeline</span>
+                    <Select
+                      options={pipelines.map((p) => ({ value: p.id, label: p.name, hint: `v${p.latest_version}` }))}
+                      value={effectivePipelineId}
+                      onChange={setPipelineId}
+                      ariaLabel="Pipeline"
+                      className="max-w-64"
+                    />
+                  </div>
+                )}
+                {!threadId && pipelinesUnavailable && pipelines.length === 0 && (
+                  <p className="text-2xs text-ink-3">
+                    Pipeline picker unavailable (admin-only) — the default published pipeline will run.
+                  </p>
+                )}
+
+                {requiredExtras.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {requiredExtras.map((f) => (
+                      <Field key={f.name} label={f.label || f.name} hint={f.description}>
+                        <Input
+                          value={extras[f.name] ?? f.default ?? ''}
+                          onChange={(e) => setExtras((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-end gap-2">
+                  <Textarea
+                    rows={2}
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        void send()
+                      }
+                    }}
+                    placeholder={busy ? 'Waiting for the pipeline to finish…' : 'Describe what you want designed…'}
+                    disabled={busy || sending}
+                    className="min-h-0 flex-1 resize-none"
+                  />
+                  {busy ? (
+                    <Button variant="secondary" icon={<Square />} onClick={() => void stop()} disabled={!lastRunId}>
+                      Stop
+                    </Button>
+                  ) : (
+                    <Button variant="primary" icon={<ArrowUp />} loading={sending} disabled={!text.trim()} onClick={() => void send()}>
+                      Send
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* run-details drawer */}
+          {drawerRunId && (
+            <Drawer onClose={() => setSearchParams((prev) => {
+              const next = new URLSearchParams(prev)
+              next.delete('run')
+              return next
+            })}>
+              <RunDetailView runId={drawerRunId} />
+            </Drawer>
+          )}
+        </>
+      )}
     </div>
   )
+
+  /** Re-sends a message as a follow-up run (used by the run card's retry). */
+  async function resend(brief: string): Promise<void> {
+    if (!brief || !threadId) return
+    setSending(true)
+    setSendError(null)
+    try {
+      await startRun({ input: { [primaryField?.name ?? 'brief']: brief }, thread_id: threadId })
+      void loadThread(threadId)
+      threadsQ.reload()
+    } catch (err: unknown) {
+      setSendError(err)
+    } finally {
+      setSending(false)
+    }
+  }
 }
 
-function HistorySkeleton() {
+
+
+/** Right-side drawer with the full run detail view. */
+function Drawer({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   return (
-    <div className="space-y-3" aria-busy="true">
-      <div className="flex justify-end">
-        <Skeleton className="h-10 w-1/2 rounded-lg" />
-      </div>
-      <Skeleton className="h-16 w-2/3 rounded-lg" />
-      <div className="flex justify-end">
-        <Skeleton className="h-8 w-1/3 rounded-lg" />
-      </div>
-      <Skeleton className="h-12 w-3/5 rounded-lg" />
-    </div>
+    <>
+      <button
+        type="button"
+        aria-label="Close details"
+        onClick={onClose}
+        className="fixed inset-0 z-40 cursor-default bg-black/20"
+      />
+      <aside className="fixed inset-y-0 right-0 z-50 flex w-[min(960px,92vw)] flex-col border-l border-line bg-page shadow-xl">
+        <div className="flex items-center justify-end border-b border-line bg-surface px-2 py-1.5">
+          <IconButton icon={<X />} label="Close details" size="sm" onClick={onClose} />
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      </aside>
+    </>
   )
 }

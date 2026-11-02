@@ -36,6 +36,14 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   )
 }
 
+/** True when an error looks like "this part of the backend doesn't exist yet": 404/501 from the API
+ * or a network-level failure. Studio/runs endpoints are still being built, so UIs surface a
+ * friendlier message for this case instead of a generic error. */
+export function isBackendMissing(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status === 404 || err.status === 501 || err.status === 503
+  return err instanceof TypeError // fetch network failure
+}
+
 export function ForbiddenState() {
   return (
     <div className="grid h-full place-items-center p-6">

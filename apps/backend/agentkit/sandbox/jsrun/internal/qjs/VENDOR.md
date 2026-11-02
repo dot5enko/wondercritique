@@ -45,11 +45,12 @@ Differences from upstream's build:
 - The patch turns QuickJS' stack limit on for WASI: the limit is
   `max(stack_top - MaxStackSize, __stack_low + STACK_RESERVE)`, and the default stack size is 0
   (= as deep as the stack allows). Overflow throws `RangeError: Maximum call stack size exceeded`.
-- 1 MiB shadow stack (`STACK_SIZE`) at the bottom of linear memory (zig links with
-  `--stack-first`), 128 KiB of it reserved for C code between two checks (`STACK_RESERVE`).
-  Measured depth: ~3370 plain calls, ~1430 via `map`, ~590 via `sort` comparators. Do not grow the
-  stack without re-measuring: wazero's native stack (Go heap, trap at ~50 MB) grows ~30 MiB per
-  MiB of guest stack at full depth.
+- 256 KiB shadow stack (`STACK_SIZE`) at the bottom of linear memory (zig links with
+  `--stack-first`), 128 KiB of it reserved for C code between two checks (`STACK_RESERVE`). So
+  JS gets at most 128 KiB (~470 plain calls) even with `MaxStackSize` 0; jsrun sets a lower
+  `MaxStackSize` per run (32 KiB by default). The stack is part of every instance's linear memory,
+  and full-depth recursion costs ~30 MiB of transient Go memory per MiB of guest stack (wazero's
+  native stack), so keep it small.
 - WASI reactor (`-mexec-model=reactor`): exports `_initialize`, no `_start`.
 - wasi-libc's dlmalloc is the first object linked, replacing zig's default emmalloc (which was
   ~20% slower and used ~25% more memory on allocation-heavy scripts). Speed and memory match

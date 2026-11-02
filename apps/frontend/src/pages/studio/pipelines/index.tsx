@@ -2,17 +2,19 @@
  * Pipelines — studio section (plan.critique-engine.md §4.5).
  *
  * `?id=<defId>` switches between the list page and the node-graph editor;
- * the back action clears the param. New pipelines are created from a modal
- * with a seeded body (one Input + one Output node, unconnected).
+ * the back action clears the param. New pipelines start either from the
+ * built-in design loop template (Input → Generator → Render → critics →
+ * Merge → Gate → Output, loop back to Generator) or as an empty graph.
  */
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { Workflow } from 'lucide-react'
-import { Button, Field, Input, Spinner, Textarea } from '../../../ui'
-import { ErrorState, ListPage, Modal, relativeTime } from '../../../components'
+import { Button, Field, Input, Segmented, Spinner, Textarea } from '../../../ui'
+import { Callout } from '../../../ui/Display'
+import { ErrorState, ListPage, Modal, relativeTime, isBackendMissing } from '../../../components'
 import { createDef, getCatalog, getDef, listDefs, type StudioDef } from '../../../api/studio'
 import { useAsync } from '../../../hooks'
-import { emptyPipelineBody } from './flow'
+import { designLoopTemplate, emptyPipelineBody } from './flow'
 import PipelineEditor from './PipelineEditor'
 
 export default function PipelinesPage() {
@@ -37,6 +39,18 @@ function slugify(s: string): string {
 
 function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => void }) {
   const list = useAsync((signal) => listDefs('pipeline', undefined, signal), [])
+  // Catalog + agent defs power the design loop template (node types/ports + agent preselect).
+  const templateSources = useAsync(
+    (signal) =>
+      Promise.all([
+        getCatalog(signal),
+        listDefs('agent', undefined, signal)
+          .then((r) => r.items)
+          .catch(() => [] as StudioDef<'agent'>[]),
+      ]),
+    [],
+  )
+  const template = templateSources.data ? designLoopTemplate(templateSources.data[0], templateSources.data[1]) : null
 
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -45,6 +59,7 @@ function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => voi
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [slugTouched, setSlugTouched] = useState(false)
+  const [useTemplate, setUseTemplate] = useState<'template' | 'blank'>('template')
 
   const slugValid = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(slug)
   const canCreate = name.trim() !== '' && slugValid
@@ -55,6 +70,7 @@ function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => voi
     setDescription('')
     setSlugTouched(false)
     setCreateError(null)
+    setUseTemplate('template')
     setCreateOpen(true)
   }
 
@@ -67,7 +83,7 @@ function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => voi
         slug,
         name: name.trim(),
         description: description.trim(),
-        draft: emptyPipelineBody(),
+        draft: useTemplate === 'template' && template ? template : emptyPipelineBody(),
       })
       setCreateOpen(false)
       onOpen(def)
@@ -79,6 +95,19 @@ function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => voi
   }
 
   if (list.error && list.data == null) {
+    if (isBackendMissing(list.error)) {
+      return (
+        <div className="p-5">
+          <Callout tone="warning" title="The studio backend isn't available yet">
+            <p className="mt-1 text-sm">
+              Pipelines can't be loaded or saved yet — the studio API hasn't been built. The chat
+              will use them as soon as it lands.
+            </p>
+            {list.error instanceof Error && <p className="mt-1 font-mono text-2xs text-ink-3">{list.error.message}</p>}
+          </Callout>
+        </div>
+      )
+    }
     return (
       <div className="p-5">
         <ErrorState error={list.error} onRetry={list.reload} />
@@ -90,13 +119,13 @@ function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => voi
     <div className="p-5">
       <ListPage<StudioDef<'pipeline'>>
         title="Pipelines"
-        description="Node graphs that chain agents, validation and rendering into reusable workflows."
+        description="A pipeline decides when each agent runs, what it receives and what happens with its output — e.g. generate → render → critique → regenerate while the score is low. The design chat runs the published pipeline."
         newButton={{ label: 'New pipeline', onClick: openCreate }}
         searchPlaceholder="Search pipelines…"
         rows={list.data?.items ?? null}
         loading={list.loading}
         onOpen={onOpen}
-        emptyState={{ icon: Workflow, title: 'No pipelines yet', description: 'Create a pipeline to get started.' }}
+        emptyState={{ icon: Workflow, title: 'No pipelines yet', description: 'Create one from the design loop template to get started.' }}
         columns={[
           { key: 'name', header: 'Name', render: (r) => <span className="font-medium text-ink">{r.name}</span> },
           { key: 'slug', header: 'Slug', width: 'w-40', render: (r) => <span className="font-mono text-2xs text-ink-2">{r.slug}</span> },
@@ -111,7 +140,11 @@ function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => voi
         onClose={creating ? () => {} : () => setCreateOpen(false)}
         size="sm"
         title="New pipeline"
-        description="Starts as an empty graph with one Input and one Output node."
+        description={
+          template
+            ? 'Start from the design loop template (generate → render → critique → gate) or an empty graph.'
+            : 'Starts as an empty graph with one Input and one Output node.'
+        }
         footer={
           <>
             {createError && <span className="mr-auto min-w-0 truncate text-xs text-danger">{createError}</span>}
@@ -125,6 +158,18 @@ function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => voi
         }
       >
         <div className="flex flex-col gap-3">
+          {template && (
+            <Field label="Starting point">
+              <Segmented
+                options={[
+                  { value: 'template', label: 'Design loop' },
+                  { value: 'blank', label: 'Empty graph' },
+                ]}
+                value={useTemplate}
+                onChange={setUseTemplate}
+              />
+            </Field>
+          )}
           <Field label="Name">
             <Input
               value={name}
@@ -181,6 +226,16 @@ function PipelineEditorPage({ id, onBack }: { id: string; onBack: () => void }) 
   )
 
   if (load.error && load.data == null) {
+    if (isBackendMissing(load.error)) {
+      return (
+        <div className="grid h-full place-items-center p-6">
+          <Callout tone="warning" title="The studio backend isn't available yet" className="max-w-lg">
+            <p className="mt-1 text-sm">Pipelines can't be loaded or saved yet — the studio API hasn't been built.</p>
+            {load.error instanceof Error && <p className="mt-1 font-mono text-2xs text-ink-3">{load.error.message}</p>}
+          </Callout>
+        </div>
+      )
+    }
     return (
       <div className="grid h-full place-items-center p-6">
         <ErrorState error={load.error} onRetry={load.reload} />

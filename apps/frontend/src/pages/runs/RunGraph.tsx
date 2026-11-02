@@ -94,7 +94,8 @@ export function RunGraph({ body, statusByNode, className }: RunGraphProps) {
       (body?.nodes ?? []).map((n) => ({
         id: n.id,
         type: 'runNode' as const,
-        position: n.position,
+        // defensive: bodies from third parties may omit positions (the editor always writes them)
+        position: n.position ?? { x: 0, y: 0 },
         data: { label: nodeLabel(n), nodeType: n.type, status: statusByNode[n.id] ?? 'none' },
         draggable: false,
         selectable: false,

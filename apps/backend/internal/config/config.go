@@ -30,6 +30,8 @@ type Config struct {
 	JWTIssuer    string `env:"JWT_ISSUER" envDefault:"wonder-critique"`
 	ResendAPIKey string `env:"RESEND_API_KEY"`
 	MailFrom     string `env:"MAIL_FROM"`
+	// AdminEmails are upserted as admin users at startup (created if missing, promoted if present).
+	AdminEmails []string `env:"ADMIN_EMAILS" envSeparator:","`
 
 	ModelAPIKey string `env:"MODEL_API_KEY"`
 	AgentModel  string `env:"AGENT_MODEL" envDefault:"muse-spark-1.3-contributor"`

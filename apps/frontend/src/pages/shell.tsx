@@ -1,15 +1,16 @@
 /**
  * Authenticated app shell — viewport frame + sidebar navigation + routed
- * content. Nav sections: main (Runs, Chat), Studio (admin-only) and Admin.
+ * content. Nav sections: Workspace (Design chat — every chat is a pipeline run),
+ * Configure (admin: pipelines, agents and what agents use) and Admin (settings).
  */
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import {
   BookOpen,
   Bot,
   Layers,
-  ListChecks,
   LogOut,
   MessageSquare,
+  MessagesSquare,
   Settings,
   ShieldCheck,
   Workflow,
@@ -24,17 +25,19 @@ interface NavEntry {
   icon: LucideIcon
 }
 
-const NAV_MAIN: NavEntry[] = [
-  { path: '/runs', label: 'Runs', icon: ListChecks },
-  { path: '/chat', label: 'Chat', icon: MessageSquare },
-]
+const NAV_MAIN: NavEntry[] = [{ path: '/chat', label: 'Design chat', icon: MessageSquare }]
 
-const NAV_STUDIO: NavEntry[] = [
+/** Configure = what runs (pipelines) and who runs it (agents + what agents use). */
+const NAV_CONFIGURE: NavEntry[] = [
   { path: '/studio/pipelines', label: 'Pipelines', icon: Workflow },
   { path: '/studio/agents', label: 'Agents', icon: Bot },
-  { path: '/studio/model-sets', label: 'Model sets', icon: Layers },
+]
+
+const NAV_AGENT_PARTS: NavEntry[] = [
+  { path: '/studio/model-sets', label: 'Models', icon: Layers },
   { path: '/studio/skills', label: 'Skills', icon: BookOpen },
   { path: '/studio/rules', label: 'Rules', icon: ShieldCheck },
+  { path: '/agent-chat', label: 'Agent chat', icon: MessagesSquare },
 ]
 
 const NAV_ADMIN: NavEntry[] = [{ path: '/settings', label: 'Settings', icon: Settings }]
@@ -70,8 +73,14 @@ export default function Shell() {
           </SidebarSection>
 
           {isAdmin && (
-            <SidebarSection title="Studio">
-              <NavItems entries={NAV_STUDIO} pathname={pathname} />
+            <SidebarSection title="Configure">
+              <NavItems entries={NAV_CONFIGURE} pathname={pathname} />
+            </SidebarSection>
+          )}
+
+          {isAdmin && (
+            <SidebarSection title="Used by agents">
+              <NavItems entries={NAV_AGENT_PARTS} pathname={pathname} />
             </SidebarSection>
           )}
 

@@ -84,6 +84,94 @@ export function emptyPipelineBody(): PipelineBody {
   }
 }
 
+/* ---------- design loop template (plan §4.5/§8) ---------- */
+
+/** First port whose name matches a candidate (case-insensitive), else null. */
+function findPort(nt: NodeType | undefined, dir: 'inputs' | 'outputs', candidates: string[]): string | null {
+  const ports = nt?.[dir] ?? []
+  for (const c of candidates) {
+    const hit = ports.find((p) => p.name.toLowerCase() === c)
+    if (hit) return hit.name
+  }
+  return null
+}
+
+const AGENT_SLUG_FOR_TEMPLATE_NODE: Record<string, string> = {
+  generator: 'component-generator',
+  'vision-critic': 'vision-critic',
+  'code-critic': 'code-critic',
+}
+
+/**
+ * The built-in critique loop as a starting graph: Brief → Generator → Render →
+ * (vision critic + code critic) → Merge → Gate → Output, with the Gate
+ * `continue` wire looping back into the Generator's feedback port.
+ *
+ * Port names come from the catalog; a wire is skipped when either endpoint
+ * doesn't exist (the Validate pass then flags the unwired port). Returns null
+ * when the catalog itself is unavailable, so callers can fall back to blank.
+ */
+export function designLoopTemplate(
+  catalog: StudioCatalog | null | undefined,
+  agents: StudioDef<'agent'>[],
+): PipelineBody | null {
+  if (!catalog || catalog.node_types.length === 0) return null
+  const nt = (type: string) => nodeTypeOf(catalog, type)
+  const agentId = (nodeId: string): string | undefined => {
+    const slug = AGENT_SLUG_FOR_TEMPLATE_NODE[nodeId]
+    return agents.find((a) => a.slug === slug && a.latest_version != null)?.id
+  }
+  const nodes: PipelineNode[] = [
+    {
+      id: 'input',
+      type: 'input',
+      config: { label: 'Brief', fields: [{ key: 'brief', name: 'brief', label: 'Brief', type: 'textarea', required: true }] },
+      position: { x: 40, y: 180 },
+    },
+    { id: 'generator', type: 'agent', config: { label: 'Generator' }, position: { x: 340, y: 100 } },
+    { id: 'render', type: 'render', config: { label: 'Render' }, position: { x: 640, y: 100 } },
+    { id: 'vision-critic', type: 'agent', config: { label: 'Vision critic' }, position: { x: 940, y: 20 } },
+    { id: 'code-critic', type: 'agent', config: { label: 'Code critic' }, position: { x: 940, y: 220 } },
+    { id: 'merge', type: 'merge', config: { label: 'Merge critiques' }, position: { x: 1220, y: 120 } },
+    { id: 'gate', type: 'gate', config: { label: 'Quality gate' }, position: { x: 1480, y: 120 } },
+    { id: 'output', type: 'output', config: { label: 'Output' }, position: { x: 1740, y: 120 } },
+  ]
+  for (const n of nodes) {
+    if (n.type !== 'agent') continue
+    const id = agentId(n.id)
+    if (id) n.config['agent_id'] = id
+  }
+
+  // [source node, source port candidates, target node, target port candidates, loop?]
+  const wanted: Array<readonly [string, string[], string, string[], boolean?]> = [
+    ['input', ['brief'], 'generator', ['brief', 'input']],
+    ['generator', ['html', 'artifact'], 'render', ['html', 'input']],
+    ['render', ['images', 'shots'], 'vision-critic', ['images', 'references', 'input']],
+    ['generator', ['html', 'artifact'], 'code-critic', ['html', 'code', 'input']],
+    ['vision-critic', ['critique'], 'merge', ['critique', 'critiques', 'input']],
+    ['code-critic', ['critique'], 'merge', ['critique', 'critiques', 'input']],
+    ['merge', ['critique'], 'gate', ['critique', 'input']],
+    ['gate', ['continue'], 'generator', ['feedback', 'input'], true],
+    ['gate', ['done'], 'output', ['html', 'input']],
+  ]
+  const edges: PipelineEdge[] = []
+  for (const [srcId, srcCands, dstId, dstCands, loop] of wanted) {
+    const src = nodes.find((n) => n.id === srcId)
+    const dst = nodes.find((n) => n.id === dstId)
+    if (!src || !dst) continue
+    const srcPort = findPort(nt(src.type), 'outputs', srcCands)
+    const dstPort = findPort(nt(dst.type), 'inputs', dstCands)
+    if (!srcPort || !dstPort) continue
+    edges.push({
+      id: edgeId({ node: srcId, port: srcPort }, { node: dstId, port: dstPort }),
+      from: { node: srcId, port: srcPort },
+      to: { node: dstId, port: dstPort },
+      ...(loop ? { loop: true as const } : {}),
+    })
+  }
+  return { nodes, edges }
+}
+
 /** Node display label — a reserved `config.label` key (see module docs). */
 export function nodeLabel(data: PipelineNodeData): string {
   const v = data.config['label']
