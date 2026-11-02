@@ -539,19 +539,19 @@ func TestCatalog(t *testing.T) {
 	h := setup(t)
 	var cat CatalogData
 	h.get(t, "/studio/catalog", &cat)
-	if len(cat.PortTypes) != 4 {
+	if len(cat.PortTypes) != 5 {
 		t.Errorf("port types = %d", len(cat.PortTypes))
 	}
 	types := map[string]bool{}
 	for _, nt := range cat.NodeTypes {
 		types[nt.Type] = true
 	}
-	for _, want := range []string{"input", "agent", "validate", "render", "merge", "gate", "output"} {
+	for _, want := range []string{"input", "agent", "validate", "render", "merge", "gate", "output", "pick_best"} {
 		if !types[want] {
 			t.Errorf("missing node type %q", want)
 		}
 	}
-	if len(cat.Tools) != 10 {
+	if len(cat.Tools) != 13 {
 		t.Errorf("tools = %d", len(cat.Tools))
 	}
 	for _, t2 := range cat.Tools {
@@ -584,7 +584,7 @@ func TestSeedDefaultsIdempotent(t *testing.T) {
 	if err := SeedDefaults(ctx, h.store, log); err != nil {
 		t.Fatal(err)
 	}
-	for kind, want := range map[string]int{KindModelSet: 1, KindAgent: 4, KindPipeline: 1, KindRule: 1, KindSkill: 0} {
+	for kind, want := range map[string]int{KindModelSet: 1, KindAgent: 5, KindPipeline: 1, KindRule: 1, KindSkill: 0} {
 		defs, err := h.store.List(ctx, kind)
 		if err != nil {
 			t.Fatal(err)

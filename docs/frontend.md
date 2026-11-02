@@ -51,6 +51,18 @@ always exactly one level deep, two modes:
 - **Settings mode** (admin and path `/studio/*` or `/settings*`): header "Settings", "Back to
   chats", then a flat list: Pipelines, Agents, Models (`/studio/model-sets`), Providers
   (`/settings/providers`), Skills, Rules.
+**Collapsible sidebar (2026-11-02):** only on `/chat`. The chats sidebar header has a
+`PanelLeftClose` IconButton; collapsed = sidebar fully hidden (no rail). Animated: the sidebar
+stays mounted inside a wrapper whose width transitions `w-60 ↔ w-0` (200 ms, `inert` +
+`aria-hidden` when hidden); the chat column's max-width transitions too, and the title-bar
+expand buttons fade/slide in via `starting:`; all `motion-reduce:transition-none`. The chat page then
+always shows its title bar, which hosts `PanelLeftOpen` (expand) + New chat IconButtons (title
+"New chat" when no thread). Settings and other routes (e.g. `/runs/:id`) always show the sidebar,
+regardless of the stored flag. State persisted in localStorage `wc_sidebar_collapsed`
+(`'1'`/`'0'`) and exposed via Outlet context — `useShellLayout()` (exported from
+`pages/shell.tsx`) → `{ sidebarCollapsed, toggleSidebar }`; `sidebarCollapsed` is the effective
+value (false outside `/chat`). The chat page's timeline + composer column is
+`w-full max-w-[1250px]` (fluid on smaller screens), `max-w-[1400px]` when collapsed.
 The thread list is shared via `ThreadsProvider`/`useThreads()` (`pages/chat/threads.tsx`,
 mounted by Shell, one `listRuns({limit:100})` query) — the chat page reads and reloads it.
 Non-admins never see Settings and get a Forbidden page on admin routes. There is deliberately

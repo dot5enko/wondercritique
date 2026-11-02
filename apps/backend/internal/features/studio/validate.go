@@ -70,9 +70,11 @@ func invalidf(format string, args ...any) *apperr.Error {
 // saves (an empty set is a valid work-in-progress) and true for publish/import.
 func validateModelSet(b ModelSetBody, requireEntries bool) error {
 	switch b.Strategy {
-	case "single", "fallback", "fanout":
+	case "single", "fallback":
+	case "fanout":
+		return invalid(`strategy "fanout" was removed; use fallback (multiple candidates come from the generate_components tool or an Agent node's count)`)
 	default:
-		return invalidf("strategy %q must be single, fallback or fanout", b.Strategy)
+		return invalidf("strategy %q must be single or fallback", b.Strategy)
 	}
 	if requireEntries && len(b.Entries) == 0 {
 		return invalid("add at least one model before publishing")
@@ -121,6 +123,9 @@ func validateAgentDraft(b AgentBody) error {
 		if !IsCatalogTool(tool) {
 			return invalidf("unknown tool %q", tool)
 		}
+	}
+	if n := b.GenerateConfig().MaxCount; n < 0 || n > MaxCandidates {
+		return invalidf("tool_config.generate_components.max_count must be between 1 and %d", MaxCandidates)
 	}
 	return nil
 }
@@ -274,6 +279,14 @@ func ValidatePipelineBody(ctx context.Context, body PipelineBody, cat *CatalogDa
 				add(n.ID, "agent node needs an agent_id", "warning")
 			} else if agentID, _ := n.Config["agent_id"].(string); !cat.hasAgent(agentID) {
 				add(n.ID, fmt.Sprintf("agent %q does not exist", agentID), "warning")
+			}
+			if c, ok := n.Config["count"].(float64); ok && (c < 1 || c > MaxCandidates) {
+				add(n.ID, fmt.Sprintf("count must be between 1 and %d", MaxCandidates), "error")
+			}
+		}
+		if n.Type == "pick_best" {
+			if id, _ := n.Config["judge_agent_id"].(string); id != "" && !cat.hasAgent(id) {
+				add(n.ID, fmt.Sprintf("judge agent %q does not exist", id), "warning")
 			}
 		}
 	}

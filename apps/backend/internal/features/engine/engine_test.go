@@ -128,7 +128,7 @@ func setup(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { _ = dbx.Close(db) })
 	if err := db.AutoMigrate(&models.StudioDef{}, &models.StudioDefVersion{}, &blobs.Blob{},
-		&models.Run{}, &models.RunStep{}, &models.Artifact{}); err != nil {
+		&models.Run{}, &models.RunStep{}, &models.Artifact{}, &models.ResultArtifact{}); err != nil {
 		t.Fatal(err)
 	}
 	defs := studio.NewStore(db)

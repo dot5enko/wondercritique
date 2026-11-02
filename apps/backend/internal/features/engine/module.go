@@ -24,6 +24,7 @@ var Module = fx.Options(
 	dbx.AsModel(&models.Run{}),
 	dbx.AsModel(&models.RunStep{}),
 	dbx.AsModel(&models.Artifact{}),
+	dbx.AsModel(&models.ResultArtifact{}),
 	fx.Provide(newEngine),
 	httpx.AsController(NewController),
 	fx.Invoke(func(*Engine) {}), // construct eagerly so crash recovery runs at start

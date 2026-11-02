@@ -60,7 +60,7 @@ constructors, so it can't catch mount conflicts.
 
 ### Validation rules (validate.go)
 
-- model_set (`validateModelSet(body, requireEntries)`): strategy ∈ single|fallback|fanout;
+- model_set (`validateModelSet(body, requireEntries)`): strategy ∈ single|fallback (`fanout` is rejected: removed);
   provider_id+model_id non-empty; `reasoning_effort` ∈ minimal|low|medium|high|xhigh;
   `max_output_tokens` ≥ 0. **≥1 entry only on publish/import** (2026-11-02) — create/draft PUT
   accept an empty `entries` list, so a new set is created empty ("inactive" = unpublished) and filled
@@ -154,8 +154,8 @@ published_by "system". Idempotent by emptiness.
 - **Body resolution**: Try/preview use the agent's DRAFT when present, else latest published; chat
   mount uses latest published only (404 unpublished). Model set: latest published body, fallback
   draft; ALL strategies walk the entries in order and skip those whose provider is unavailable
-  (disabled / no key); the first buildable entry runs (single/fanout run just it).
-  (Parallel fanout is an engine concern, out of scope — noted in code.) Provider failures are
+  (disabled / no key); the first buildable entry runs (single runs just it).
+  Provider failures are
   re-wrapped (same code/status) as `model set "{slug}" ({strategy}): {provider}/{model}: {reason};
   enable the provider and set its API key under Providers, or pick another model…` listing every
   entry tried (updated 2026-11-02).
@@ -188,3 +188,19 @@ published_by "system". Idempotent by emptiness.
 `apps/frontend/src/api/{studio,settings,agents}.ts` match the implemented shapes (verified by
 `npm run typecheck`); runs.ts is served by the engine (`docs/backend.engine.md`). Frontend "backend missing" callouts
 for studio/settings pages can now be pointed at the real API.
+
+## Multi-candidate tools & judge (updated 2026-11-02)
+
+- Catalog tools `generate_components`, `pick_best`, `critique_component` (flag `candidates`); catalog
+  `agents` is now serialized (pickers). `submit_artifact` takes exactly one of `html`, `path`
+  (`c3` → `/work/candidates/c3.html`) or `paths` (multi-result).
+- `AgentBody.tool_config` (`ToolConfig`): `generate_components{agent_id,max_count}` (agent empty = the
+  calling agent as worker without these tools; max 8, default 5), `pick_best{judge_agent_id}`
+  (default slug `vision-judge`), `critique_component{critic_agent_id}` (default `vision-critic`).
+  `checkAgentRefs` verifies the ids exist.
+- Seeds: `vision-judge` agent (custom contract `JudgeFieldsSchema`: winner/ranking/summary),
+  `ensureJudge` adds it on already-seeded installs (re-created if deleted). Seeded
+  `component-generator` has the three tools + guidance; existing DB agents must enable them manually.
+- Node types: Agent gains `count`/`variations` + output `candidates`; new `pick_best`. Prompt
+  variables `criteria`, `variation` added. Runtime code: `agentrun/candidates.go`,
+  `agentrun/tools_candidates.go`; worker builds (`NodeRequest.Worker`) strip the candidate tools.

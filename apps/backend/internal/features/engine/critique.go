@@ -186,6 +186,24 @@ func strCfg(cfg map[string]any, key, def string) string {
 	return def
 }
 
+// strListCfg reads a list of non-empty strings (blank entries keep their slot
+// as "" so indexes stay aligned).
+func strListCfg(cfg map[string]any, key string) []string {
+	list, ok := cfg[key].([]any)
+	if !ok {
+		if ss, ok := cfg[key].([]string); ok {
+			return ss
+		}
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, v := range list {
+		s, _ := v.(string)
+		out = append(out, strings.TrimSpace(s))
+	}
+	return out
+}
+
 func boolCfg(cfg map[string]any, key string, def bool) bool {
 	if v, ok := cfg[key].(bool); ok {
 		return v

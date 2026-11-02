@@ -18,7 +18,6 @@ const EMPTY_BODY: ModelSetBody = { strategy: 'single', entries: [] }
 const STRATEGY_HINTS: Record<ModelSetBody['strategy'], string> = {
   single: 'single: run the first entry only',
   fallback: 'fallback: try entries in order until one succeeds',
-  fanout: 'fanout: run all entries in parallel — a Merge node combines their outputs',
 }
 
 export interface ModelSetEditorProps {
@@ -104,7 +103,6 @@ export function ModelSetEditor({ id, catalog }: ModelSetEditorProps) {
                 options={[
                   { value: 'single', label: 'Single' },
                   { value: 'fallback', label: 'Fallback' },
-                  { value: 'fanout', label: 'Fanout' },
                 ]}
                 value={draft.draft.strategy}
                 onChange={(strategy) => draft.setDraft((prev) => ({ ...prev, strategy }))}
@@ -153,9 +151,6 @@ export function ModelSetEditor({ id, catalog }: ModelSetEditorProps) {
                 onChange={(entries) => draft.setDraft((prev) => ({ ...prev, entries }))}
               />
 
-              {draft.draft.strategy === 'fanout' && (
-                <Callout tone="info">All entries run in parallel — a Merge node combines their outputs.</Callout>
-              )}
             </CardBody>
           </Card>
         </div>

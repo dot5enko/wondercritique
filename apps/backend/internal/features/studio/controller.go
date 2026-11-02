@@ -145,6 +145,18 @@ func (c *Controller) checkAgentRefs(ctx context.Context, b AgentBody) error {
 			return invalidf("rule %q does not exist", id)
 		}
 	}
+	for field, id := range map[string]string{
+		"generate_components.agent_id":       b.GenerateConfig().AgentID,
+		"pick_best.judge_agent_id":           b.PickBestConfig().JudgeAgentID,
+		"critique_component.critic_agent_id": b.CritiqueConfig().CriticAgentID,
+	} {
+		if id == "" {
+			continue
+		}
+		if _, err := c.store.Get(ctx, KindAgent, id); err != nil {
+			return invalidf("tool_config.%s: agent %q does not exist", field, id)
+		}
+	}
 	return nil
 }
 

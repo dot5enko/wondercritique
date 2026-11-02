@@ -174,6 +174,29 @@ function FilmThumb({
   )
 }
 
+/* ---------- multi-component result ---------- */
+
+function ResultTile({ artifactId, index, score }: { artifactId: string; index: number; score: number | null }) {
+  const { content, loading } = useArtifactContent(artifactId)
+  return (
+    <div className="overflow-hidden rounded-lg border border-line bg-app">
+      <div className="h-56 overflow-hidden bg-white">
+        {loading && !content ? (
+          <Skeleton className="h-full w-full rounded-none" />
+        ) : content?.text != null ? (
+          <iframe srcDoc={content.text} sandbox="" title={`Component ${index}`} className="h-full w-full bg-white" />
+        ) : (
+          <span className="grid h-full place-items-center text-2xs text-ink-3">Nothing to preview.</span>
+        )}
+      </div>
+      <div className="flex items-center justify-between px-2 py-1 text-2xs text-ink-2">
+        <span className="font-medium">#{index}</span>
+        {score != null && <span className="tabular-nums">{formatScore(score)}</span>}
+      </div>
+    </div>
+  )
+}
+
 /* ---------- stage ---------- */
 
 export function DesignStage({
@@ -242,6 +265,17 @@ export function DesignStage({
 
   // Reset per-iteration sub-selection when the shown iteration changes.
   useEffect(() => setShotIdx(0), [current])
+
+  const results = run.results ?? []
+  if (!running && results.length > 1) {
+    return (
+      <div className="grid gap-3 sm:grid-cols-2">
+        {results.map((r, i) => (
+          <ResultTile key={r.artifact_id} artifactId={r.artifact_id} index={i + 1} score={r.score} />
+        ))}
+      </div>
+    )
+  }
 
   if (!cur) return null
 

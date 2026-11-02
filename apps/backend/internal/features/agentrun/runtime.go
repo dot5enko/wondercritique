@@ -23,6 +23,7 @@ import (
 	"github.com/dot5enko/wondercritique/apps/backend/agentkit/vfs/sqlite"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
 	llmsvc "github.com/dot5enko/wondercritique/apps/backend/internal/features/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
@@ -36,6 +37,7 @@ type Runtime struct {
 	agentStore store.Store // shared sqlite agentkit store (chat sessions)
 	blobs      *blobs.Store
 	js         *jsrun.Runner
+	renderer   render.Renderer // screenshots for pick_best / critique_component (nil = unavailable)
 
 	vfsStore *sqlite.Store
 	db       *sql.DB
@@ -70,7 +72,7 @@ func (r *Runtime) providerFor(ctx context.Context, providerID string) (akitllm.P
 }
 
 // NewRuntime builds the runtime. The sqlite VFS store shares the app's DB.
-func NewRuntime(defs *studio.Store, svc *llmsvc.Service, agentStore store.Store, db *gorm.DB, blobStore *blobs.Store, log *slog.Logger) (*Runtime, error) {
+func NewRuntime(defs *studio.Store, svc *llmsvc.Service, agentStore store.Store, db *gorm.DB, blobStore *blobs.Store, renderer render.Renderer, log *slog.Logger) (*Runtime, error) {
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("agentrun: sql db: %w", err)
@@ -84,6 +86,7 @@ func NewRuntime(defs *studio.Store, svc *llmsvc.Service, agentStore store.Store,
 		llm:        svc,
 		agentStore: agentStore,
 		blobs:      blobStore,
+		renderer:   renderer,
 		js:         jsrun.New(jsrun.Config{}),
 		log:        log,
 		vfsStore:   vfsStore,
@@ -107,8 +110,9 @@ func (r *Runtime) logWriter() *slog.Logger { return r.log }
 
 // resolvedBody is a resolved agent definition body plus the def it came from.
 type resolvedBody struct {
-	Def  *models.StudioDef
-	Body studio.AgentBody
+	Def   *models.StudioDef
+	Body  studio.AgentBody
+	Draft bool // Body is the unpublished draft
 }
 
 // resolveAgent resolves the agent body: the draft when present (and allowed),
@@ -125,7 +129,7 @@ func (r *Runtime) resolveAgent(ctx context.Context, defID string, draftFirst boo
 		if err != nil {
 			return nil, err
 		}
-		return &resolvedBody{Def: def, Body: body}, nil
+		return &resolvedBody{Def: def, Body: body, Draft: true}, nil
 	}
 	if def.LatestVer == nil {
 		return nil, apperr.NotFound("no draft and no published version")
@@ -274,7 +278,7 @@ func (r *Runtime) buildAgentInfo(ctx context.Context, res *resolvedBody, name st
 		skillMounts[i] = skillMount{slug: sk.slug, files: files}
 	}
 	system := AssembleSystem(res.Body.SystemPrompt, ruleGroups, promptSkills, res.Body.OutputContract)
-	tools, err := r.buildTools(res.Body)
+	tools, err := r.buildTools(res)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -291,6 +295,7 @@ func (r *Runtime) buildAgentInfo(ctx context.Context, res *resolvedBody, name st
 		Tools:           tools,
 		Store:           sessStore,
 		MaxSteps:        maxSteps,
+		ToolTimeout:     toolTimeout(res.Body.Tools),
 		MaxOutputTokens: entryParam(entry.Params, func(p *studio.ModelParams) int { return p.MaxOutputTokens }),
 		ReasoningEffort: entryEffort(entry.Params),
 		Hooks: agentkit.Hooks{

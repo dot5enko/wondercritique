@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/agentrun"
@@ -19,7 +20,7 @@ import (
 
 // Per-node deadlines.
 const (
-	agentNodeTimeout  = 15 * time.Minute
+	agentNodeTimeout  = 30 * time.Minute
 	renderNodeTimeout = 90 * time.Second
 )
 
@@ -31,6 +32,7 @@ type nodeRun struct {
 	step   *models.RunStep
 	inputs map[string][]*portVal
 
+	amu       sync.Mutex // artifacts are also recorded from agent tool calls (Sink)
 	artifacts []*models.Artifact
 }
 
@@ -47,6 +49,8 @@ type nodeResult struct {
 }
 
 func (nr *nodeRun) artifactIDs() []string {
+	nr.amu.Lock()
+	defer nr.amu.Unlock()
 	if len(nr.artifacts) == 0 {
 		return nil
 	}
@@ -74,6 +78,8 @@ func (nr *nodeRun) exec(ctx context.Context) (*nodeResult, error) {
 		return nr.execGate(ctx)
 	case "output":
 		return nr.execOutput(ctx)
+	case "pick_best":
+		return nr.execPickBest(ctx)
 	}
 	return nil, fmt.Errorf("unsupported node type %q", nr.node.Type)
 }
@@ -118,7 +124,9 @@ func (nr *nodeRun) artifact(ctx context.Context, kind string, data []byte, mime 
 	if err := nr.st.e.DB.WithContext(bg).Create(a).Error; err != nil {
 		return nil, fmt.Errorf("record artifact: %w", err)
 	}
+	nr.amu.Lock()
 	nr.artifacts = append(nr.artifacts, a)
+	nr.amu.Unlock()
 	nr.it.mu.Lock()
 	nr.it.artifactIDs = append(nr.it.artifactIDs, a.ID)
 	nr.it.mu.Unlock()
@@ -177,6 +185,8 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, agentNodeTimeout)
 	defer cancel()
+	sink := &stepSink{nr: nr}
+	ctx = agentrun.WithSink(ctx, sink)
 
 	req := agentrun.NodeRequest{
 		AgentID:    agentID,
@@ -187,28 +197,21 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 		Owner:      nr.st.run.OwnerID,
 		Title:      fmt.Sprintf("%s · %s", nr.st.run.PipelineName, nr.st.g.label(nr.node.ID)),
 	}
+	if count := int(numCfg(cfg, "count", 1)); count > 1 {
+		return nr.execAgentCandidates(ctx, req, count, sink)
+	}
 	out, err := nr.st.e.Agents.RunNode(ctx, req)
 
 	res := &nodeResult{}
 	if out != nil {
-		u := models.TokenUsage{
-			InputTokens: out.Usage.InputTokens, CachedInputTokens: out.Usage.CachedInputTokens,
-			OutputTokens: out.Usage.OutputTokens, ReasoningTokens: out.Usage.ReasoningTokens,
-		}
-		res.usage = &u
 		res.session = out.SessionID
 		if out.ProviderID != "" {
 			res.model = out.Model()
-			res.cost = nr.st.e.priceUsage(out.ProviderID, out.ModelID, u)
 		}
-		res.pinned = map[string]int{}
-		if out.AgentVersion > 0 {
-			res.pinned["agent"] = out.AgentVersion
-		}
-		if out.ModelSetVersion > 0 {
-			res.pinned["model_set"] = out.ModelSetVersion
-		}
+		res.pinned = pinnedOf(out)
+		sink.SubRun(out)
 	}
+	res.usage, res.cost = sink.totals()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			err = fmt.Errorf("the agent did not finish within %s", agentNodeTimeout)
@@ -219,16 +222,32 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 	res.ports = map[string]*portVal{}
 	switch out.Contract.Type {
 	case "artifact":
+		if len(out.Items) > 1 {
+			// A multi-component result ("give me 5 buttons"): every item is a
+			// result; html consumers (render, critics, gate) are skipped.
+			items, err := nr.recordItems(ctx, out.Items, nil)
+			if err != nil {
+				return res, err
+			}
+			nr.it.mu.Lock()
+			nr.it.items = items
+			nr.it.mu.Unlock()
+			res.ports["candidates"] = &portVal{Items: items}
+			res.output = jsonOut(map[string]any{"items": itemsOut(items), "tools": sink.eventList()})
+			return res, nil
+		}
 		a, err := nr.artifact(ctx, models.ArtifactHTML, []byte(out.HTML), "text/html; charset=utf-8", nil)
 		if err != nil {
 			return res, err
 		}
 		pv := &portVal{Text: out.HTML}
+		cand := &candidate{nodeID: nr.node.ID, artifactID: a.ID, html: out.HTML}
 		res.ports["html"], res.ports["artifact"] = pv, pv
+		res.ports["candidates"] = &portVal{Items: []*candidate{cand}}
 		nr.it.mu.Lock()
-		nr.it.candidate = &candidate{nodeID: nr.node.ID, artifactID: a.ID, html: out.HTML}
+		nr.it.candidate = cand
 		nr.it.mu.Unlock()
-		res.output = jsonOut(map[string]any{"artifact_id": a.ID, "bytes": len(out.HTML)})
+		res.output = jsonOut(map[string]any{"artifact_id": a.ID, "bytes": len(out.HTML), "tools": sink.eventList()})
 	case "critique":
 		score := out.Critique.Score
 		if _, err := nr.artifact(ctx, models.ArtifactJSON, jsonOut(out.Critique), "application/json", &score); err != nil {
@@ -250,6 +269,169 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 		res.output = jsonOut(out.Text)
 	}
 	return res, nil
+}
+
+// execAgentCandidates runs the agent `count` times in parallel (Agent node
+// config count > 1). The candidates go out on the candidates port; without a
+// Pick best node downstream they are the iteration's (multi-component) result.
+func (nr *nodeRun) execAgentCandidates(ctx context.Context, req agentrun.NodeRequest, count int, sink *stepSink) (*nodeResult, error) {
+	cands, err := agentrun.GenerateCandidates(ctx, nr.st.e.Agents.RunNode, agentrun.GenerateRequest{
+		Base: req, Count: count, Variations: strListCfg(nr.node.Config, "variations"),
+	})
+	res := &nodeResult{pinned: map[string]int{}}
+	var htmls, variations []string
+	var failed []map[string]any
+	for _, c := range cands {
+		if c.Result != nil {
+			sink.SubRun(c.Result)
+			if res.session == "" && c.Result.SessionID != "" {
+				res.session = c.Result.SessionID
+				res.pinned = pinnedOf(c.Result)
+				if c.Result.ProviderID != "" {
+					res.model = c.Result.Model()
+				}
+			}
+		}
+		if c.Err != nil {
+			failed = append(failed, map[string]any{"candidate": c.Index, "error": c.Err.Error()})
+			continue
+		}
+		htmls = append(htmls, c.HTML)
+		variations = append(variations, c.Variation)
+	}
+	res.usage, res.cost = sink.totals()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			err = fmt.Errorf("the candidates did not finish within %s", agentNodeTimeout)
+		}
+		return res, err
+	}
+	items, err := nr.recordItems(ctx, htmls, variations)
+	if err != nil {
+		return res, err
+	}
+	nr.it.mu.Lock()
+	nr.it.items = items
+	nr.it.mu.Unlock()
+	res.ports = map[string]*portVal{"candidates": {Items: items}}
+	res.output = jsonOut(map[string]any{"items": itemsOut(items), "failed": failed})
+	return res, nil
+}
+
+// recordItems stores each HTML as an artifact of this step.
+func (nr *nodeRun) recordItems(ctx context.Context, htmls, variations []string) ([]*candidate, error) {
+	items := make([]*candidate, 0, len(htmls))
+	for i, h := range htmls {
+		a, err := nr.artifact(ctx, models.ArtifactHTML, []byte(h), "text/html; charset=utf-8", nil)
+		if err != nil {
+			return nil, err
+		}
+		c := &candidate{nodeID: nr.node.ID, artifactID: a.ID, html: h}
+		if i < len(variations) {
+			c.variation = variations[i]
+		}
+		items = append(items, c)
+	}
+	return items, nil
+}
+
+func itemsOut(items []*candidate) []map[string]any {
+	out := make([]map[string]any, len(items))
+	for i, c := range items {
+		out[i] = map[string]any{"artifact_id": c.artifactID, "bytes": len(c.html)}
+		if c.variation != "" {
+			out[i]["variation"] = c.variation
+		}
+	}
+	return out
+}
+
+func pinnedOf(out *agentrun.NodeResult) map[string]int {
+	p := map[string]int{}
+	if out.AgentVersion > 0 {
+		p["agent"] = out.AgentVersion
+	}
+	if out.ModelSetVersion > 0 {
+		p["model_set"] = out.ModelSetVersion
+	}
+	return p
+}
+
+/* ---------- sink: what agent tools produce inside a step ---------- */
+
+// stepSink records tool-made artifacts on the step and sums the usage/cost of
+// the step's agent runs (the main one and any nested candidate/judge runs).
+type stepSink struct {
+	nr *nodeRun
+
+	mu        sync.Mutex
+	usage     models.TokenUsage
+	any       bool
+	cost      float64
+	costKnown bool
+	events    []map[string]any
+}
+
+var _ agentrun.Sink = (*stepSink)(nil)
+
+func (s *stepSink) Artifact(ctx context.Context, kind, mime string, data []byte, score *float64) (string, error) {
+	a, err := s.nr.artifact(ctx, kind, data, mime, score)
+	if err != nil {
+		return "", err
+	}
+	return a.ID, nil
+}
+
+func (s *stepSink) SubRun(res *agentrun.NodeResult) {
+	if res == nil {
+		return
+	}
+	u := models.TokenUsage{
+		InputTokens: res.Usage.InputTokens, CachedInputTokens: res.Usage.CachedInputTokens,
+		OutputTokens: res.Usage.OutputTokens, ReasoningTokens: res.Usage.ReasoningTokens,
+	}
+	var cost *float64
+	if res.ProviderID != "" {
+		cost = s.nr.st.e.priceUsage(res.ProviderID, res.ModelID, u)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usage.Add(u)
+	s.any = true
+	if cost != nil {
+		s.cost += *cost
+		s.costKnown = true
+	}
+}
+
+func (s *stepSink) Event(kind string, payload any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, map[string]any{"kind": kind, "data": payload})
+}
+
+func (s *stepSink) eventList() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.events) == 0 {
+		return nil
+	}
+	return append([]map[string]any(nil), s.events...)
+}
+
+// totals is the step's summed usage and cost (nil when nothing ran / unpriced).
+func (s *stepSink) totals() (*models.TokenUsage, *float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.any {
+		return nil, nil
+	}
+	u := s.usage
+	if !s.costKnown {
+		return &u, nil
+	}
+	c := s.cost
+	return &u, &c
 }
 
 // priceUsage estimates the USD cost of usage on a model (nil when unpriced).
@@ -508,4 +690,129 @@ func (nr *nodeRun) execOutput(ctx context.Context) (*nodeResult, error) {
 		out["note"] = "no HTML artifact was produced"
 	}
 	return &nodeResult{output: jsonOut(out)}, nil
+}
+
+/* ---------- pick best ---------- */
+
+// execPickBest renders every candidate on the candidates port and lets a vision
+// judge agent pick the best; the winner continues as the iteration's candidate
+// (html port) and the set is dropped.
+func (nr *nodeRun) execPickBest(ctx context.Context) (*nodeResult, error) {
+	var items []*candidate
+	for _, v := range nr.inputs["candidates"] {
+		items = append(items, v.Items...)
+	}
+	if len(items) == 0 {
+		return nil, errors.New("no candidates to pick from")
+	}
+	if len(items) > studio.MaxCandidates {
+		items = items[:studio.MaxCandidates]
+	}
+	choose := func(w *candidate) {
+		nr.it.mu.Lock()
+		nr.it.candidate = w
+		nr.it.items = nil
+		nr.it.mu.Unlock()
+	}
+	if len(items) == 1 {
+		choose(items[0])
+		return &nodeResult{
+			ports:  map[string]*portVal{"html": {Text: items[0].html}},
+			output: jsonOut(map[string]any{"winner": 1, "artifact_id": items[0].artifactID, "note": "a single candidate passes through"}),
+		}, nil
+	}
+
+	cfg := nr.node.Config
+	ctx, cancel := context.WithTimeout(ctx, agentNodeTimeout)
+	defer cancel()
+
+	judgeID := strCfg(cfg, "judge_agent_id", "")
+	if judgeID == "" {
+		def, err := nr.st.e.Defs.GetBySlug(ctx, studio.KindAgent, studio.DefaultJudgeSlug)
+		if err != nil {
+			return nil, fmt.Errorf("no judge agent is selected and the default %q agent does not exist", studio.DefaultJudgeSlug)
+		}
+		judgeID = def.ID
+	}
+
+	// Judges compare several screenshots at once: 1x unless configured.
+	rcfg := make(map[string]any, len(cfg)+1)
+	for k, v := range cfg {
+		rcfg[k] = v
+	}
+	if _, ok := rcfg["dpr"]; !ok {
+		rcfg["dpr"] = 1.0
+	}
+	variants := renderVariants(rcfg)
+	put := func(ctx context.Context, png []byte) (string, error) {
+		a, err := nr.artifact(ctx, models.ArtifactImage, png, "image/png", nil)
+		if err != nil {
+			return "", err
+		}
+		return blobs.URL(a.BlobSHA), nil
+	}
+	entries := make([]agentrun.JudgeCandidate, len(items))
+	for i, c := range items {
+		entries[i] = agentrun.JudgeCandidate{HTML: c.html, Variation: c.variation}
+		rctx, rcancel := context.WithTimeout(ctx, renderNodeTimeout)
+		shots, err := agentrun.RenderShots(rctx, nr.st.e.Renderer, c.html, variants, put)
+		rcancel()
+		if err != nil {
+			entries[i].Note = err.Error()
+		}
+		entries[i].Images = shots
+	}
+
+	brief, _ := combine(nr.inputs["brief"])
+	if strings.TrimSpace(brief) == "" {
+		brief = briefOf(nr.st.input)
+	}
+	sink := &stepSink{nr: nr}
+	v, err := agentrun.Judge(ctx, nr.st.e.Agents.RunNode, agentrun.JudgeRequest{
+		Base: agentrun.NodeRequest{
+			AgentID: judgeID, Draft: nr.st.run.IsTest, Owner: nr.st.run.OwnerID,
+			Title: fmt.Sprintf("%s · %s", nr.st.run.PipelineName, nr.st.g.label(nr.node.ID)),
+		},
+		Brief:      brief,
+		Criteria:   strCfg(cfg, "criteria", ""),
+		Candidates: entries,
+	})
+	res := &nodeResult{}
+	if v != nil && v.Result != nil {
+		sink.SubRun(v.Result)
+		res.session = v.Result.SessionID
+		res.pinned = pinnedOf(v.Result)
+		if v.Result.ProviderID != "" {
+			res.model = v.Result.Model()
+		}
+	}
+	res.usage, res.cost = sink.totals()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			err = fmt.Errorf("the judge did not finish within %s", agentNodeTimeout)
+		}
+		return res, err
+	}
+
+	winner := items[v.Winner-1]
+	ranking := make([]map[string]any, 0, len(v.Ranking))
+	for _, r := range v.Ranking {
+		ranking = append(ranking, map[string]any{
+			"candidate": r.Candidate, "artifact_id": items[r.Candidate-1].artifactID,
+			"score": r.Score, "reason": r.Reason,
+		})
+	}
+	verdict := jsonOut(map[string]any{
+		"winner": v.Winner, "artifact_id": winner.artifactID, "ranking": ranking, "summary": v.Summary,
+	})
+	if _, err := nr.artifact(ctx, models.ArtifactJSON, verdict, "application/json", v.WinnerScore()); err != nil {
+		return res, err
+	}
+	choose(winner)
+	res.ports = map[string]*portVal{
+		"html":    {Text: winner.html},
+		"ranking": {Text: string(verdict)},
+	}
+	res.output = verdict
+	return res, nil
 }

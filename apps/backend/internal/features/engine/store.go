@@ -86,6 +86,16 @@ type RunDetail struct {
 	PipelineBody      json.RawMessage    `json:"pipeline_body,omitempty"` // the pinned snapshot, for graph labels
 	Steps             []StepView         `json:"steps"`
 	Artifacts         []ArtifactView     `json:"artifacts"`
+	// Results are the run's results in display order: one entry (the selected
+	// final artifact) or every component of a multi-component result.
+	Results []ResultView `json:"results"`
+}
+
+// ResultView is one result of a completed run.
+type ResultView struct {
+	ArtifactID string   `json:"artifact_id"`
+	Position   int      `json:"position"`
+	Score      *float64 `json:"score"`
 }
 
 func pipelineRef(r *models.Run) PipelineRef {
@@ -129,12 +139,20 @@ func (e *Engine) RunDetail(ctx context.Context, id string, v Viewer) (*RunDetail
 	if err := e.DB.WithContext(ctx).Where("run_id = ?", id).Order("created_at ASC, id ASC").Find(&arts).Error; err != nil {
 		return nil, apperr.Internal(err)
 	}
+	var results []models.ResultArtifact
+	if err := e.DB.WithContext(ctx).Where("run_id = ?", id).Order("position ASC").Find(&results).Error; err != nil {
+		return nil, apperr.Internal(err)
+	}
 
 	d := &RunDetail{
 		ID: run.ID, Status: run.Status, Pipeline: pipelineRef(run), PipelineVersionID: run.PipelineVersionID,
 		IsTest: run.IsTest, Input: run.Input, Iteration: run.Iteration, BestArtifactID: run.BestArtifactID,
 		Usage: &run.Usage, Cost: run.Cost, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, ThreadID: run.ThreadID, PipelineBody: run.Snapshot,
 		Steps: make([]StepView, 0, len(steps)), Artifacts: make([]ArtifactView, 0, len(arts)),
+		Results: make([]ResultView, 0, len(results)),
+	}
+	for _, r := range results {
+		d.Results = append(d.Results, ResultView{ArtifactID: r.ArtifactID, Position: r.Position, Score: r.Score})
 	}
 	if run.Error != "" {
 		msg := run.Error

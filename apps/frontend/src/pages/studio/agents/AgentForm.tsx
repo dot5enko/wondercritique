@@ -32,6 +32,7 @@ import {
   type PromptVariable,
   type StudioCatalog,
   type StudioDef,
+  type ToolConfig,
 } from '../../../api/studio'
 import type { DirtyDraft } from '../../../hooks'
 import {
@@ -338,6 +339,15 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
   }
 
   const selectedSet = catalog.model_sets.find((r) => r.id === draft.model_set_id)
+  const agentOptions = (none: string) => [
+    { value: '', label: none },
+    ...catalog.agents.filter((a) => a.id !== def.id).map((a) => ({ value: a.id, label: a.name, hint: a.slug })),
+  ]
+  const setToolConfig = <K extends keyof ToolConfig>(key: K, patch: NonNullable<ToolConfig[K]>): void =>
+    setDraft((d) => ({
+      ...d,
+      tool_config: { ...d.tool_config, [key]: { ...d.tool_config?.[key], ...patch } },
+    }))
 
   return (
     <div className="space-y-2">
@@ -458,6 +468,64 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
           )}
         </CardBody>
       </Card>
+
+      {/* Multi-candidate tool settings */}
+      {(['generate_components', 'pick_best', 'critique_component'] as const).some((t) => draft.tools.includes(t)) && (
+        <Card plain>
+          <CardHeader
+            plain
+            title="Candidate tools"
+            description="Which agents the multi-candidate tools use. Empty = defaults."
+          />
+          <CardBody plain className="space-y-3">
+            {draft.tools.includes('generate_components') && (
+              <>
+                <Field label="Worker generator" hint="Default: this agent itself (without the candidate tools).">
+                  <Select
+                    className="w-full max-w-sm"
+                    ariaLabel="Worker generator"
+                    options={agentOptions('Default (this agent)')}
+                    value={draft.tool_config?.generate_components?.agent_id ?? ''}
+                    onChange={(v) => setToolConfig('generate_components', { agent_id: v })}
+                  />
+                </Field>
+                <Field label="Max candidates per call" hint="1–8, default 5.">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={8}
+                    className="w-24"
+                    value={draft.tool_config?.generate_components?.max_count ?? ''}
+                    onChange={(e) => setToolConfig('generate_components', { max_count: Number(e.target.value) || 0 })}
+                  />
+                </Field>
+              </>
+            )}
+            {draft.tools.includes('pick_best') && (
+              <Field label="Judge agent" hint="Must use a custom contract with winner / ranking / summary.">
+                <Select
+                  className="w-full max-w-sm"
+                  ariaLabel="Judge agent"
+                  options={agentOptions('Default (vision-judge)')}
+                  value={draft.tool_config?.pick_best?.judge_agent_id ?? ''}
+                  onChange={(v) => setToolConfig('pick_best', { judge_agent_id: v })}
+                />
+              </Field>
+            )}
+            {draft.tools.includes('critique_component') && (
+              <Field label="Critic agent" hint="Must use the critique output contract.">
+                <Select
+                  className="w-full max-w-sm"
+                  ariaLabel="Critic agent"
+                  options={agentOptions('Default (vision-critic)')}
+                  value={draft.tool_config?.critique_component?.critic_agent_id ?? ''}
+                  onChange={(v) => setToolConfig('critique_component', { critic_agent_id: v })}
+                />
+              </Field>
+            )}
+          </CardBody>
+        </Card>
+      )}
 
       {/* Skills & rules */}
       <Card plain>

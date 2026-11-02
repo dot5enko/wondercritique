@@ -97,3 +97,16 @@ type Artifact struct {
 func (Run) TableName() string      { return "runs" }
 func (RunStep) TableName() string  { return "run_steps" }
 func (Artifact) TableName() string { return "artifacts" }
+
+// ResultArtifact is one result of a completed run, in display order: the
+// selected final HTML artifact, or every component of a multi-component
+// result ("give me 5 buttons").
+type ResultArtifact struct {
+	Base
+	RunID      string `gorm:"index;size:64"`
+	ArtifactID string `gorm:"size:64"`
+	Position   int
+	Score      *float64
+}
+
+func (ResultArtifact) TableName() string { return "result_artifacts" }

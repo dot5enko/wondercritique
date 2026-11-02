@@ -111,9 +111,11 @@ func (s sessionFS) List(ctx context.Context, dir string, recursive bool) ([]vfs.
 
 // buildTools assembles the agent's tools from its allowlist. The output
 // contract decides which terminal submit tool is exposed.
-func (r *Runtime) buildTools(body studio.AgentBody) (*tool.Set, error) {
+func (r *Runtime) buildTools(res *resolvedBody) (*tool.Set, error) {
+	body := res.Body
 	set := tool.NewSet()
 	fsys := sessionFS{runtime: r}
+	env := toolEnv{r: r, fsys: fsys, self: res}
 	for _, name := range body.Tools {
 		switch name {
 		case "read_file", "write_file", "edit_file", "glob", "grep":
@@ -122,13 +124,19 @@ func (r *Runtime) buildTools(body studio.AgentBody) (*tool.Set, error) {
 			set.Add(jsrun.NewTool(r.js, fsys))
 		case "validate_component":
 			set.Add(validateComponentTool())
+		case "generate_components":
+			set.Add(env.generateTool())
+		case "pick_best":
+			set.Add(env.pickBestTool())
+		case "critique_component":
+			set.Add(env.critiqueTool())
 		case "submit_artifact", "submit_critique", "submit_fields":
 			// Terminal submit tools are added once, below, per contract.
 		default:
 			return nil, fmt.Errorf("agentrun: unknown tool %q", name)
 		}
 	}
-	if term := submitTool(body.OutputContract); term != nil {
+	if term := submitTool(body.OutputContract, fsys); term != nil {
 		set.Add(tool.AsTerminal(term))
 	}
 	return set, nil
@@ -161,15 +169,49 @@ func validateComponentTool() tool.Tool {
 // submitTool builds the terminal submit tool for the output contract; nil when
 // the contract type is unknown. The tool's output (returned to the caller as
 // the run's final answer) is the submitted payload itself.
-func submitTool(contract studio.OutputContract) tool.Tool {
+func submitTool(contract studio.OutputContract, fsys vfs.FS) tool.Tool {
 	switch contract.Type {
 	case "artifact":
 		type in struct {
-			HTML string `json:"html" jsonschema_description:"The complete HTML component fragment"`
+			HTML  string   `json:"html,omitempty" jsonschema_description:"The complete HTML component fragment"`
+			Path  string   `json:"path,omitempty" jsonschema_description:"Instead of html: a workspace file holding the component, e.g. /work/candidates/c2.html (or just c2)"`
+			Paths []string `json:"paths,omitempty" jsonschema_description:"Several components as the result (one file each), e.g. when the user asked for 5 buttons"`
 		}
 		return tool.New("submit_artifact",
-			"Submit the final HTML component and finish the task.",
-			func(ctx context.Context, i in) (string, error) { return i.HTML, nil })
+			"Submit the final HTML component and finish the task. Pass exactly one of html, path or paths (paths = several components as the result).",
+			func(ctx context.Context, i in) (string, error) {
+				set := 0
+				for _, b := range []bool{i.HTML != "", i.Path != "", len(i.Paths) > 0} {
+					if b {
+						set++
+					}
+				}
+				if set != 1 {
+					return "", fmt.Errorf("pass exactly one of html, path or paths")
+				}
+				switch {
+				case i.HTML != "":
+					return i.HTML, nil
+				case i.Path != "":
+					return readComponent(ctx, fsys, i.Path)
+				}
+				items := make([]string, 0, len(i.Paths))
+				for _, p := range i.Paths {
+					h, err := readComponent(ctx, fsys, p)
+					if err != nil {
+						return "", err
+					}
+					items = append(items, h)
+				}
+				if len(items) == 1 {
+					return items[0], nil
+				}
+				raw, err := json.Marshal(map[string][]string{componentSetKey: items})
+				if err != nil {
+					return "", err
+				}
+				return string(raw), nil
+			})
 	case "critique":
 		type issue struct {
 			Severity   string `json:"severity" jsonschema_description:"info, warning or error"`

@@ -113,6 +113,7 @@ export interface StudioCatalog {
   /** Models from enabled providers only — pickable in model sets / agents / Agent nodes. */
   models: CatalogModel[]
   model_sets: StudioRef[]
+  agents: StudioRef[]
   skills: StudioRef[]
   rules: StudioRef[]
   prompt_sections: PromptSection[]
@@ -141,7 +142,7 @@ export interface ModelSetEntry {
 }
 
 export interface ModelSetBody {
-  strategy: 'single' | 'fallback' | 'fanout'
+  strategy: 'single' | 'fallback'
   entries: ModelSetEntry[]
 }
 
@@ -165,6 +166,14 @@ export interface AgentBody {
   rule_ids: string[]
   output_contract: AgentOutputContract
   limits: AgentLimits
+  /** Config of the multi-candidate tools; empty agent ids use the defaults. */
+  tool_config?: ToolConfig
+}
+
+export interface ToolConfig {
+  generate_components?: { agent_id?: string; max_count?: number }
+  pick_best?: { judge_agent_id?: string }
+  critique_component?: { critic_agent_id?: string }
 }
 
 export interface PipelineNode {

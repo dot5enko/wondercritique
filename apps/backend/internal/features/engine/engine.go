@@ -192,8 +192,17 @@ func (e *Engine) finish(run *models.Run, st *runState, runErr error) {
 		run.Status = models.RunFailed
 		run.Error = runErr.Error()
 	}
+	var results []models.ResultArtifact
 	if st != nil {
 		st.fillRun(run)
+		if run.Status == models.RunCompleted {
+			results = st.results()
+		}
+	}
+	if len(results) > 0 {
+		if err := e.DB.WithContext(bg).Create(&results).Error; err != nil {
+			e.Log.Error("engine: persist results", "run", run.ID, "err", err)
+		}
 	}
 	// A struct update with Select applies the usage serializer (map updates would not).
 	if err := e.DB.WithContext(bg).Model(&models.Run{}).Where("id = ?", run.ID).
@@ -209,6 +218,13 @@ func (e *Engine) finish(run *models.Run, st *runState, runErr error) {
 		}
 		if run.Cost != nil {
 			fields["cost"] = *run.Cost
+		}
+		if len(results) > 0 {
+			ids := make([]string, len(results))
+			for i, r := range results {
+				ids[i] = r.ArtifactID
+			}
+			fields["result_artifact_ids"] = ids
 		}
 		e.bus.publish(run.ID, "run_completed", fields)
 	} else {

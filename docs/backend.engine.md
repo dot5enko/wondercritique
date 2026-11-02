@@ -33,7 +33,7 @@ in-memory DB answers parallel writers with SQLITE_LOCKED). Tests use a fake `Nod
 |---|---|
 | `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, thread_id?, is_test?}` → **201** `{id, thread_id, status}`; the run executes in the background |
 | `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input |
-| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) |
+| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) |
 | `GET /runs/{id}/events` | SSE; replays the run's history, then live; closes after `run_completed`/`run_failed`; `: ping` every 15 s. SSE requests skip the 60 s request timeout |
 | `POST /runs/{id}/cancel` | 204; 409 when already finished; a stale (not executing) pending/running row is marked cancelled |
 | `GET /artifacts/{id}/content` | blob with its stored MIME; `nosniff` + `Content-Security-Policy: … sandbox`; access follows the run's owner scoping |
@@ -121,9 +121,27 @@ OnEvent}) (*NodeResult, error)`:
   `ModelSetVersion`. `BuildInput` now accepts lists of image refs (`[]string`/`[]any`) as one
   prompt variable (each becomes an image block; preview shows `[image: name]`).
 
+## Multi-candidate results (updated 2026-11-02)
+
+- Table `result_artifacts(run_id, artifact_id, position, score)` (`models.ResultArtifact`), written
+  in `finish()` for completed runs: one row = the selected final artifact (with its score); several
+  rows = a multi-component result ("give me 5 buttons"). `run_completed` event carries
+  `result_artifact_ids`.
+- Agent node config `count` (>1) runs the agent in parallel (`agentrun.GenerateCandidates`, optional
+  `variations[]` hints) → output port `candidates` (port type `candidates`, items = `portVal.Items`).
+  An agent that submits several components (`submit_artifact paths`) also emits `candidates` and no
+  `html`, so render/critics/gate/output are skipped (engine skips nodes with an unfired connected
+  input) and the iteration's `set` (`iterState.items`) becomes the result.
+- `pick_best` node (inputs `candidates`, `brief`; outputs `html`, `ranking`): renders each
+  candidate (`renderVariants`, dpr 1), runs the judge agent (`judge_agent_id`, default slug
+  `vision-judge`) via `agentrun.Judge`, sets the winner as the iteration candidate. A single
+  candidate passes through.
+- `stepSink` (agentrun.Sink via ctx) records tool-made artifacts on the step and sums nested-run
+  usage/cost; step output includes `tools` events (`generated`, `picked`). `agentNodeTimeout` = 30m.
+
 ## Known limits / future work
 
-- Fanout model sets run their first entry; no mid-run resume; `gate.expr` unsupported; Output node
+- No mid-run resume; `gate.expr` unsupported; Output node
   ports beyond `html`/`critique` are decorative (selection is engine-side); `GET /runs` has offset
   paging only; no retention/cleanup of runs, blobs or agent sessions.
 - Chrome must exist on the host for the render node (see `docs/backend.render.md`); without it a

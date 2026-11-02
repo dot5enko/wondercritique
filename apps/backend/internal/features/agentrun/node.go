@@ -133,12 +133,20 @@ type NodeRequest struct {
 	Title      string
 	// OnEvent observes the agent's run events (optional).
 	OnEvent func(agentkit.Event)
+	// Extra blocks are appended to the built input message (variation hints,
+	// labelled candidate screenshots for judges).
+	Extra []llm.Block
+	// Worker builds the agent without the multi-candidate tools
+	// (generate_components / pick_best / critique_component), so nested runs
+	// cannot fan out again.
+	Worker bool
 }
 
 // NodeResult is the parsed outcome of a node run.
 type NodeResult struct {
 	Text      string          // raw final answer
-	HTML      string          // artifact contract
+	HTML      string          // artifact contract (the first item of a set)
+	Items     []string        // artifact contract: every component when a set (≥2) was submitted
 	Critique  *Critique       // critique contract
 	Fields    json.RawMessage // custom contract
 	Contract  studio.OutputContract
@@ -204,12 +212,15 @@ func (r *Runtime) resolveForNode(ctx context.Context, req NodeRequest) (res *res
 
 // nodeAgent returns the (cached) agent for a node request and a release func
 // that drops the read-only material of uncached draft builds.
-func (r *Runtime) nodeAgent(ctx context.Context, res *resolvedBody, usedDraft bool, msOverride string) (*nodeBuild, func(), error) {
+func (r *Runtime) nodeAgent(ctx context.Context, res *resolvedBody, usedDraft bool, msOverride string, worker bool) (*nodeBuild, func(), error) {
 	body := res.Body
 	if msOverride != "" {
 		body.ModelSetID = msOverride
 	}
-	build := &resolvedBody{Def: res.Def, Body: body}
+	if worker {
+		body.Tools = withoutCandidateTools(body.Tools)
+	}
+	build := &resolvedBody{Def: res.Def, Body: body, Draft: usedDraft}
 	ver := versionOf(res.Def)
 
 	if usedDraft {
@@ -221,7 +232,7 @@ func (r *Runtime) nodeAgent(ctx context.Context, res *resolvedBody, usedDraft bo
 		return &nodeBuild{agent: agent, info: *info}, func() { r.dropMaterial(name) }, nil
 	}
 
-	key := fmt.Sprintf("node|%s|%d|%s", res.Def.ID, ver, body.ModelSetID)
+	key := fmt.Sprintf("node|%s|%d|%s|%t", res.Def.ID, ver, body.ModelSetID, worker)
 	r.mu.Lock()
 	if nb, ok := r.nodeBuilds[key]; ok {
 		r.mu.Unlock()
@@ -232,6 +243,9 @@ func (r *Runtime) nodeAgent(ctx context.Context, res *resolvedBody, usedDraft bo
 	name := fmt.Sprintf("%s@v%d", res.Def.Slug, ver)
 	if msOverride != "" {
 		name += "+" + shortID(msOverride)
+	}
+	if worker {
+		name += "~worker"
 	}
 	agent, info, err := r.buildAgentInfo(ctx, build, name, r.agentStore)
 	if err != nil {
@@ -266,7 +280,7 @@ func (r *Runtime) RunNode(ctx context.Context, req NodeRequest) (*NodeResult, er
 	if err != nil {
 		return nil, err
 	}
-	nb, release, err := r.nodeAgent(ctx, res, usedDraft, req.ModelSetID)
+	nb, release, err := r.nodeAgent(ctx, res, usedDraft, req.ModelSetID, req.Worker)
 	defer release()
 	if err != nil {
 		return nil, err
@@ -293,7 +307,10 @@ func (r *Runtime) RunNode(ctx context.Context, req NodeRequest) (*NodeResult, er
 		out.AgentVersion = 0
 	}
 
-	msgs := []llm.Message{BuildInput(res.Body.InputTemplate, req.Samples, false)}
+	first := BuildInput(res.Body.InputTemplate, req.Samples, false)
+	first.Blocks = append(first.Blocks, req.Extra...)
+	msgs := []llm.Message{first}
+	ctx = withScope(ctx, nodeScope{samples: req.Samples, owner: req.Owner, worker: req.Worker})
 	for attempt := 0; ; attempt++ {
 		text, usage, steps, err := drive(ctx, nb.agent, sess.ID, msgs, req.OnEvent)
 		out.Usage.Add(usage)
@@ -349,6 +366,18 @@ func drive(ctx context.Context, a *agentkit.Agent, sessionID string, msgs []llm.
 func (n *NodeResult) parse() error {
 	switch n.Contract.Type {
 	case "artifact":
+		if items, ok := parseComponentSet(n.Text); ok {
+			for i, it := range items {
+				h, err := ExtractHTML(it)
+				if err != nil {
+					return fmt.Errorf("component %d: %w", i+1, err)
+				}
+				items[i] = h
+			}
+			n.Items = items
+			n.HTML = items[0]
+			return nil
+		}
 		html, err := ExtractHTML(n.Text)
 		if err != nil {
 			return err
@@ -380,4 +409,28 @@ func nudgeText(contract studio.OutputContract, cause error) string {
 		return fmt.Sprintf("Your answer could not be used (%v). Call submit_fields now with the required fields.", cause)
 	}
 	return "Please answer again."
+}
+
+// componentSetKey marks a multi-component submission (submit_artifact paths).
+const componentSetKey = "components"
+
+// parseComponentSet recognises {"components": ["<…>", …]} with ≥2 items.
+func parseComponentSet(text string) ([]string, bool) {
+	t := strings.TrimSpace(text)
+	if !strings.HasPrefix(t, "{") {
+		return nil, false
+	}
+	var in map[string]json.RawMessage
+	if json.Unmarshal([]byte(t), &in) != nil {
+		return nil, false
+	}
+	raw, ok := in[componentSetKey]
+	if !ok {
+		return nil, false
+	}
+	var items []string
+	if json.Unmarshal(raw, &items) != nil || len(items) < 2 {
+		return nil, false
+	}
+	return items, true
 }

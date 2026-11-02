@@ -167,3 +167,11 @@ thread streams each iteration live.
   the stub doesn't serve).
 
 **Layout width (2026-11-02).** `pages/shell.tsx` wraps the Outlet of all settings/studio pages in a `max-w-[1100px]` centered column; only the pipeline graph editor (`/studio/pipelines?id=`) is full-bleed. Pages must not set their own wider max-width. `Modal` sizes: sm/md/lg/xl (xl = `max-w-5xl`).
+
+## Candidate tools UI (updated 2026-11-02)
+
+- Agent editor (`AgentForm.tsx`): "Candidate tools" card appears when generate_components /
+  pick_best / critique_component are enabled; edits `tool_config` (agent pickers from
+  `catalog.agents`, max count). Model-set strategy is single|fallback only.
+- Chat `DesignStage.tsx`: when `run.results.length > 1` and the run is finished it shows a gallery
+  of the result components (live HTML tiles) instead of the iteration stage.

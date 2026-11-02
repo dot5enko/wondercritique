@@ -7,7 +7,8 @@
  *  - **Settings** (`/studio/*`, `/settings/*`, admin only): "Back to chats" +
  *    a flat list of configuration pages.
  */
-import { Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { Outlet, useLocation, useNavigate, useOutletContext, useSearchParams } from 'react-router'
 import {
   ArrowLeft,
   BookOpen,
@@ -15,6 +16,7 @@ import {
   KeyRound,
   Layers,
   LogOut,
+  PanelLeftClose,
   Settings,
   ShieldCheck,
   SquarePen,
@@ -49,6 +51,20 @@ function isSettingsPath(pathname: string): boolean {
   return pathname.startsWith('/studio/') || pathname === '/settings' || pathname.startsWith('/settings/')
 }
 
+const SIDEBAR_COLLAPSED_KEY = 'wc_sidebar_collapsed'
+
+/** Layout state the Shell exposes to routed pages (via Outlet context). */
+export interface ShellLayout {
+  /** Sidebar hidden entirely; the page must render an expand control (`toggleSidebar`). */
+  sidebarCollapsed: boolean
+  toggleSidebar: () => void
+}
+
+/** Read the Shell layout state from a routed page. */
+export function useShellLayout(): ShellLayout {
+  return useOutletContext<ShellLayout | undefined>() ?? { sidebarCollapsed: false, toggleSidebar: () => {} }
+}
+
 export default function Shell() {
   const { user } = useAuth()
   const { pathname } = useLocation()
@@ -57,16 +73,58 @@ export default function Shell() {
   // Settings pages share a 1100px content column; the pipeline graph editor stays full-bleed.
   const constrained = settingsMode && !(pathname.startsWith('/studio/pipelines') && params.get('id'))
 
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleSidebar = useCallback((): void => {
+    setCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0')
+      } catch {
+        // private mode etc. — state still toggles for this session
+      }
+      return next
+    })
+  }, [])
+  // Only the chat page can collapse the sidebar: it hosts the expand button in its title bar.
+  const canCollapse = !settingsMode && pathname === '/chat'
+  const hidden = canCollapse && collapsed
+  const layout = useMemo<ShellLayout>(() => ({ sidebarCollapsed: hidden, toggleSidebar }), [hidden, toggleSidebar])
+
   return (
     <ThreadsProvider>
       <div className="h-dvh w-dvw bg-page p-2.5">
         <div className="flex h-full w-full overflow-hidden rounded-xl border border-line bg-surface shadow-xs">
-          {settingsMode ? <SettingsSidebar pathname={pathname} /> : <ChatsSidebar pathname={pathname} />}
+          {/* Sidebar stays mounted; collapse animates the wrapper width to 0 (content keeps
+              its fixed w-60 so it slides out instead of reflowing). */}
+          <div
+            inert={hidden}
+            aria-hidden={hidden || undefined}
+            className={`h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none ${hidden ? 'w-0' : 'w-60'}`}
+          >
+            {settingsMode ? (
+              <SettingsSidebar pathname={pathname} />
+            ) : (
+              <ChatsSidebar
+                pathname={pathname}
+                collapseButton={
+                  canCollapse && (
+                    <IconButton icon={<PanelLeftClose />} label="Collapse sidebar" size="sm" onClick={toggleSidebar} />
+                  )
+                }
+              />
+            )}
+          </div>
 
           <main className="flex min-w-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className={constrained ? 'mx-auto h-full w-full max-w-[1100px]' : 'h-full'}>
-                <Outlet />
+                <Outlet context={layout} />
               </div>
             </div>
           </main>
@@ -76,7 +134,7 @@ export default function Shell() {
   )
 }
 
-function ChatsSidebar({ pathname }: { pathname: string }) {
+function ChatsSidebar({ pathname, collapseButton }: { pathname: string; collapseButton: ReactNode }) {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const { user } = useAuth()
@@ -88,7 +146,12 @@ function ChatsSidebar({ pathname }: { pathname: string }) {
     <Sidebar
       title="Wonder Critique"
       className="w-60"
-      actions={<IconButton icon={<SquarePen />} label="New chat" size="sm" onClick={() => navigate('/chat')} />}
+      actions={
+        <>
+          <IconButton icon={<SquarePen />} label="New chat" size="sm" onClick={() => navigate('/chat')} />
+          {collapseButton}
+        </>
+      }
       footer={
         <div className="space-y-1">
           {user?.role === 'admin' && (

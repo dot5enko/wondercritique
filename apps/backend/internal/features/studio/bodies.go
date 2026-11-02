@@ -44,7 +44,7 @@ type ModelSetEntry struct {
 
 // ModelSetBody is the body of a model_set definition.
 type ModelSetBody struct {
-	Strategy string          `json:"strategy"` // single | fallback | fanout
+	Strategy string          `json:"strategy"` // single | fallback (legacy "fanout" behaves as fallback)
 	Entries  []ModelSetEntry `json:"entries"`
 }
 
@@ -72,6 +72,66 @@ type AgentBody struct {
 	RuleIDs        []string       `json:"rule_ids"`
 	OutputContract OutputContract `json:"output_contract"`
 	Limits         AgentLimits    `json:"limits"`
+	ToolConfig     *ToolConfig    `json:"tool_config,omitempty"`
+}
+
+// ToolConfig configures the multi-candidate tools (generate_components,
+// pick_best, critique_component). Every field is optional; empty agent ids
+// fall back to the defaults documented per field.
+type ToolConfig struct {
+	GenerateComponents *GenerateToolConfig `json:"generate_components,omitempty"`
+	PickBest           *PickBestToolConfig `json:"pick_best,omitempty"`
+	CritiqueComponent  *CritiqueToolConfig `json:"critique_component,omitempty"`
+}
+
+// GenerateToolConfig configures generate_components.
+type GenerateToolConfig struct {
+	// AgentID is the worker generator; empty = the calling agent itself
+	// (built without the multi-candidate tools, so it cannot recurse).
+	AgentID  string `json:"agent_id,omitempty"`
+	MaxCount int    `json:"max_count,omitempty"` // per call; default 5, hard cap MaxCandidates
+}
+
+// PickBestToolConfig configures pick_best.
+type PickBestToolConfig struct {
+	JudgeAgentID string `json:"judge_agent_id,omitempty"` // empty = the agent with slug DefaultJudgeSlug
+}
+
+// CritiqueToolConfig configures critique_component.
+type CritiqueToolConfig struct {
+	CriticAgentID string `json:"critic_agent_id,omitempty"` // empty = the agent with slug DefaultCriticSlug
+}
+
+// Multi-candidate defaults.
+const (
+	MaxCandidates         = 8
+	DefaultCandidateCount = 5
+	DefaultJudgeSlug      = "vision-judge"
+	DefaultCriticSlug     = "vision-critic"
+)
+
+// GenerateConfig returns the generate_components config (never nil).
+func (b AgentBody) GenerateConfig() GenerateToolConfig {
+	if b.ToolConfig != nil && b.ToolConfig.GenerateComponents != nil {
+		return *b.ToolConfig.GenerateComponents
+	}
+	return GenerateToolConfig{}
+}
+
+// PickBestConfig returns the pick_best config (never nil).
+func (b AgentBody) PickBestConfig() PickBestToolConfig {
+	if b.ToolConfig != nil && b.ToolConfig.PickBest != nil {
+		return *b.ToolConfig.PickBest
+	}
+	return PickBestToolConfig{}
+}
+
+// CritiqueConfig returns the critique_component config (never nil).
+func (b AgentBody) CritiqueConfig() CritiqueToolConfig {
+	if b.ToolConfig != nil && b.ToolConfig.CritiqueComponent != nil {
+		return *b.ToolConfig.CritiqueComponent
+	}
+	return CritiqueToolConfig{}
 }
 
 /* ---------- pipeline ---------- */

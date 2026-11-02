@@ -56,7 +56,7 @@ func setup(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	agentStore := memory.New()
-	rt, err := NewRuntime(defs, svc, agentStore, db, blobs.NewStore(db), log)
+	rt, err := NewRuntime(defs, svc, agentStore, db, blobs.NewStore(db), nil, log)
 	if err != nil {
 		t.Fatal(err)
 	}

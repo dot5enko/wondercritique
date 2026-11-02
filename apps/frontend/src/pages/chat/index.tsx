@@ -12,8 +12,8 @@
  * surface as a clear "backend can't be reached" state instead of crashes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router'
-import { ArrowUp, MessageSquareDashed, Square, X } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router'
+import { ArrowUp, MessageSquareDashed, PanelLeftOpen, Square, SquarePen, X } from 'lucide-react'
 import { Button, IconButton, Input, Select, Textarea } from '../../ui'
 import { Badge, Callout, EmptyState, Skeleton } from '../../ui/Display'
 import { Field } from '../../ui/Form'
@@ -29,6 +29,7 @@ import {
 } from '../../api/runs'
 import { getDef, getVersion, listDefs, type PipelineBody } from '../../api/studio'
 import { useThreads } from './threads'
+import { useShellLayout } from '../shell'
 import { RunCard } from './RunCard'
 import { parseInputFields } from '../runs/NewRunModal'
 import { RunDetailView } from '../runs/detail'
@@ -230,6 +231,13 @@ export default function ChatPage() {
 
   const drawerRunId = params.get('run')
 
+  // Chat column: 1250px max (fluid below), 1400px when the Shell sidebar is collapsed.
+  const { sidebarCollapsed, toggleSidebar } = useShellLayout()
+  const navigate = useNavigate()
+  const widthClass = `transition-[max-width] duration-200 ease-out motion-reduce:transition-none ${
+    sidebarCollapsed ? 'max-w-[1400px]' : 'max-w-[1250px]'
+  }`
+
   /* ---------- render ---------- */
 
   return (
@@ -249,17 +257,26 @@ export default function ChatPage() {
       ) : (
         <>
           <div className="flex min-w-0 flex-1 flex-col">
-            {/* header — only for an open thread ("New chat" lives in the sidebar) */}
-            {activeThread && (
+            {/* header — for an open thread, or always when the sidebar is collapsed
+                (it then hosts the expand + New chat controls) */}
+            {(activeThread || sidebarCollapsed) && (
               <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5">
-                <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{activeThread.title}</p>
-                {activeThread.runs > 1 && <Badge tone="neutral">{activeThread.runs} runs</Badge>}
+                {sidebarCollapsed && (
+                  <div className="-ml-2 flex items-center gap-0.5 transition-[opacity,translate] delay-100 duration-200 ease-out starting:-translate-x-2 starting:opacity-0 motion-reduce:transition-none">
+                    <IconButton icon={<PanelLeftOpen />} label="Expand sidebar" size="sm" onClick={toggleSidebar} />
+                    <IconButton icon={<SquarePen />} label="New chat" size="sm" onClick={() => navigate('/chat')} />
+                  </div>
+                )}
+                <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+                  {activeThread?.title ?? (threadId ? '' : 'New chat')}
+                </p>
+                {activeThread && activeThread.runs > 1 && <Badge tone="neutral">{activeThread.runs} runs</Badge>}
               </div>
             )}
 
             {/* timeline */}
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-5">
+              <div className={`mx-auto flex w-full flex-col gap-4 px-4 py-5 ${widthClass}`}>
                 {!threadId && (
                   <div className="rounded-xl border border-line bg-surface p-5">
                     <EmptyState
@@ -336,7 +353,7 @@ export default function ChatPage() {
 
             {/* composer */}
             <div className="border-t border-line bg-surface">
-              <div className="mx-auto flex max-w-3xl flex-col gap-2 px-4 py-3">
+              <div className={`mx-auto flex w-full flex-col gap-2 px-4 py-3 ${widthClass}`}>
                 {sendError != null && (
                   isBackendMissing(sendError) ? (
                     <Callout tone="warning" title="The runs backend can't be reached">

@@ -19,13 +19,15 @@ type portVal struct {
 	Text     string
 	Images   []string // wcblob:// refs
 	Critique *agentrun.Critique
+	Items    []*candidate // candidates port: several HTML components
 }
 
 // iterRecord is what a finished iteration contributes to output selection.
 type iterRecord struct {
 	n          int
 	score      *float64
-	artifactID string // the iteration's candidate HTML artifact ("" when none)
+	artifactID string   // the iteration's candidate HTML artifact ("" when none)
+	set        []string // a multi-component result: every item's artifact id (artifactID = the first)
 }
 
 // runState is the mutable state of one pipeline run.
@@ -62,7 +64,8 @@ type iterState struct {
 	mergeScore  *float64
 	gateScore   *float64
 	candidate   *candidate
-	decision    string // "", "continue" or "done"
+	items       []*candidate // components submitted/generated as a set and not reduced by Pick best
+	decision    string       // "", "continue" or "done"
 	feedback    *portVal
 }
 
@@ -70,6 +73,7 @@ type candidate struct {
 	nodeID     string
 	artifactID string
 	html       string
+	variation  string
 }
 
 func newIterState(n int) *iterState {
@@ -314,6 +318,11 @@ func (st *runState) currentRecord(it *iterState) *iterRecord {
 	it.mu.Lock()
 	if it.candidate != nil {
 		rec.artifactID = it.candidate.artifactID
+	} else if len(it.items) > 0 {
+		for _, c := range it.items {
+			rec.set = append(rec.set, c.artifactID)
+		}
+		rec.artifactID = rec.set[0]
 	}
 	it.mu.Unlock()
 	return rec
@@ -380,6 +389,30 @@ func (st *runState) selectFinal(current *iterRecord, strategy string) *iterRecor
 	}
 	st.final = pick
 	return pick
+}
+
+// results lists the run's result artifacts: every item of a set result, else
+// the selected final artifact.
+func (st *runState) results() []models.ResultArtifact {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	f := st.final
+	if f == nil || f.artifactID == "" {
+		return nil
+	}
+	ids := f.set
+	if len(ids) == 0 {
+		ids = []string{f.artifactID}
+	}
+	out := make([]models.ResultArtifact, len(ids))
+	for i, id := range ids {
+		out[i] = models.ResultArtifact{Base: models.Base{ID: models.NewID()}, RunID: st.run.ID, ArtifactID: id, Position: i}
+		if len(ids) == 1 && f.score != nil {
+			s := *f.score
+			out[i].Score = &s
+		}
+	}
+	return out
 }
 
 // fillRun copies the outcome counters onto the run row.

@@ -13,8 +13,8 @@ type StudioDef struct {
 	Slug        string          `json:"slug" gorm:"index:idx_studio_defs_kind_slug,unique;size:100"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
-	Draft       json.RawMessage `json:"draft" gorm:"type:text"`          // nil when never edited after publish/seed
-	DraftUpdAt  *time.Time      `json:"draft_updated_at"`                // set on every draft write
+	Draft       json.RawMessage `json:"draft" gorm:"type:text"` // nil when never edited after publish/seed
+	DraftUpdAt  *time.Time      `json:"draft_updated_at"`       // set on every draft write
 	LatestVer   *int            `json:"latest_version" gorm:"column:latest_version"`
 	Archived    bool            `json:"archived"`
 }
@@ -30,5 +30,5 @@ type StudioDefVersion struct {
 	PublishedAt time.Time       `json:"published_at"`
 }
 
-func (StudioDef) TableName() string      { return "studio_defs" }
+func (StudioDef) TableName() string        { return "studio_defs" }
 func (StudioDefVersion) TableName() string { return "studio_def_versions" }

@@ -221,6 +221,14 @@ export interface Run {
   pipeline_body?: PipelineBody
   steps: RunStep[]
   artifacts: Artifact[]
+  /** Results in display order: one (the selected artifact) or every component of a multi-component result. */
+  results?: RunResult[]
+}
+
+export interface RunResult {
+  artifact_id: string
+  position: number
+  score: number | null
 }
 
 export function getRun(id: string, signal?: AbortSignal): Promise<Run> {

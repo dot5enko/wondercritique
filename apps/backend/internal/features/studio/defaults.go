@@ -20,7 +20,7 @@ func SeedDefaults(ctx context.Context, store *Store, log *slog.Logger) error {
 		count += int64(len(defs))
 	}
 	if count > 0 {
-		return nil
+		return ensureJudge(ctx, store, log)
 	}
 
 	seeded := 0
@@ -100,7 +100,18 @@ Rules you must follow:
 - External resources only as data: URIs or Google Fonts links.
 
 Work iteratively: inspect the feedback and screenshots you receive, fix the
-issues, and call submit_artifact with the complete HTML fragment when done.`
+issues, and call submit_artifact with the complete HTML fragment when done.
+
+Exploring and multiple results:
+- When the brief is open-ended and there is no previous design or feedback,
+  explore: call generate_components (3-5 candidates, each with a distinct
+  variation hint), then pick_best, then submit_artifact with the winner's path.
+- When the user asks for several components ("give me 5 buttons"), call
+  generate_components with that count and submit_artifact with all their paths.
+  Use critique_component on individual items only when the user asks for
+  polished/reviewed results, and fix them before submitting.
+- When you receive feedback on a previous attempt, revise that design directly
+  instead of exploring again.`
 	visionCriticSystem := `You are a meticulous UI design critic. You receive a rendered screenshot
 of an HTML component plus its layout metrics and the original brief.
 
@@ -125,7 +136,8 @@ with strengths, issues and a 0-10 score when you deliver a verdict.`
 			system:      generatorSystem,
 			input:       "## Brief\n\n{{brief}}\n\n{{feedback}}",
 			contract:    "artifact",
-			tools:       []string{"read_file", "write_file", "edit_file", "glob", "grep", "run_js", "validate_component"},
+			tools: []string{"read_file", "write_file", "edit_file", "glob", "grep", "run_js", "validate_component",
+				"generate_components", "pick_best", "critique_component"},
 		},
 		{slug: "vision-critic", name: "Vision critic",
 			description: "Criticizes rendered screenshots (needs a vision-capable model); submits a structured critique.",
@@ -164,6 +176,10 @@ with strengths, issues and a 0-10 score when you deliver a verdict.`
 		agentIDs[a.slug] = def.ID
 		seeded++
 	}
+	if err := seed(KindAgent, DefaultJudgeSlug, judgeName, judgeDescription, judgeSeed(msID)); err != nil {
+		return err
+	}
+	seeded++
 
 	// pipeline: the design-loop graph (plan §4.5).
 	if err := seed(KindPipeline, "default", "Design loop",

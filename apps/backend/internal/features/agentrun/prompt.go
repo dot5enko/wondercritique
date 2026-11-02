@@ -28,6 +28,7 @@ var placeholder = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 var promptVariableNames = map[string]bool{
 	"brief": true, "input": true, "html": true, "code": true, "images": true,
 	"references": true, "critique": true, "feedback": true, "output": true,
+	"criteria": true, "variation": true,
 }
 
 // AssembleSystem builds the full system prompt: the author's system prompt plus

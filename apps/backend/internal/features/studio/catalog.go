@@ -81,7 +81,7 @@ type PromptVariable struct {
 }
 
 // CatalogData is everything the catalog endpoint serves; it is also the input
-// of ValidatePipelineBody (Agents is internal — not serialized).
+// of ValidatePipelineBody (Agents also feed the tool_config pickers).
 type CatalogData struct {
 	PortTypes          []PortType       `json:"port_types"`
 	NodeTypes          []NodeType       `json:"node_types"`
@@ -94,7 +94,7 @@ type CatalogData struct {
 	PromptVariables    []PromptVariable `json:"prompt_variables"`
 	ValidatorRuleCodes []string         `json:"validator_rule_codes"`
 
-	Agents []StudioRef `json:"-"` // for pipeline validation; not part of the wire shape
+	Agents []StudioRef `json:"agents"` // pipeline validation + tool_config / judge pickers
 }
 
 // NodeType returns the node type with the given id (nil when unknown).
@@ -145,6 +145,7 @@ func catalogPortTypes() []PortType {
 		{"image", "Image"},
 		{"critique", "Critique"},
 		{"json", "JSON"},
+		{"candidates", "Candidates"},
 	}
 }
 
@@ -210,6 +211,7 @@ func catalogNodeTypes() []NodeType {
 				{Name: "artifact", Type: "text"},
 				{Name: "critique", Type: "critique"},
 				{Name: "output", Type: "json"},
+				{Name: "candidates", Type: "candidates"},
 			},
 			ConfigSchema: map[string]any{
 				"type": "object",
@@ -218,10 +220,37 @@ func catalogNodeTypes() []NodeType {
 					"agent_id":      map[string]any{"type": "string", "title": "Agent"},
 					"agent_version": map[string]any{"type": "number", "title": "Agent version (optional pin)"},
 					"model_set_id":  map[string]any{"type": "string", "title": "Model set override"},
+					"count": map[string]any{"type": "number", "title": "Candidates (artifact agents; >1 runs them in parallel → candidates port)",
+						"default": 1, "minimum": 1, "maximum": MaxCandidates},
+					"variations": map[string]any{"type": "array", "title": "Per-candidate direction hints", "items": map[string]any{"type": "string"}},
 				},
 				"required": []string{"agent_id"},
 			},
 			Defaults: map[string]any{"label": "Agent"},
+		},
+		{
+			Type:        "pick_best",
+			Name:        "Pick best",
+			Description: "Renders every candidate and lets a vision judge agent pick the best; the winner continues as html.",
+			Inputs: []NodePort{
+				{Name: "candidates", Type: "candidates"},
+				{Name: "brief", Type: "text"},
+			},
+			Outputs: []NodePort{
+				{Name: "html", Type: "text"},
+				{Name: "ranking", Type: "json"},
+			},
+			ConfigSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"label":          map[string]any{"type": "string", "title": "Label"},
+					"judge_agent_id": map[string]any{"type": "string", "title": "Judge agent (default: vision-judge)"},
+					"criteria":       map[string]any{"type": "string", "title": "Extra judging criteria"},
+					"width":          map[string]any{"type": "number", "title": "Render width (px)", "default": 1280},
+					"color_scheme":   map[string]any{"type": "string", "title": "Color scheme", "enum": []string{"light", "dark"}, "default": "light"},
+				},
+			},
+			Defaults: map[string]any{"label": "Pick best", "width": 1280, "color_scheme": "light"},
 		},
 		{
 			Type:        "validate",
@@ -336,7 +365,10 @@ var CatalogTools = []ToolInfo{
 	{Name: "grep", Description: "Search file contents with a regular expression.", Flags: []string{"fs"}},
 	{Name: "run_js", Description: "Run JavaScript in the sandboxed (no fs, no net) runtime.", Flags: []string{"sandbox"}},
 	{Name: "validate_component", Description: "Validate an HTML component fragment and return the violation report.", Flags: []string{"validate"}},
-	{Name: "submit_artifact", Description: "Submit the final HTML component and finish. Terminal tool.", Flags: []string{"terminal"}},
+	{Name: "generate_components", Description: "Generate several candidate components in parallel (worker generator agent); files land in /work/candidates/.", Flags: []string{"candidates"}},
+	{Name: "pick_best", Description: "Render candidates and let a vision judge agent rank them and pick the best.", Flags: []string{"candidates"}},
+	{Name: "critique_component", Description: "Render one component and get a structured critique from a critic agent.", Flags: []string{"candidates"}},
+	{Name: "submit_artifact", Description: "Submit the final HTML component (or several, via paths) and finish. Terminal tool.", Flags: []string{"terminal"}},
 	{Name: "submit_critique", Description: "Submit the structured critique and finish. Terminal tool.", Flags: []string{"terminal"}},
 	{Name: "submit_fields", Description: "Submit the custom-contract fields and finish. Terminal tool.", Flags: []string{"terminal"}},
 }
@@ -372,6 +404,8 @@ func catalogPromptVariables() []PromptVariable {
 		{Name: "critique", Description: "The previous critique."},
 		{Name: "feedback", Description: "The gate's feedback from the previous iteration."},
 		{Name: "output", Description: "Custom output-contract fields (agents with a custom contract)."},
+		{Name: "criteria", Description: "Judging criteria (pick_best judges)."},
+		{Name: "variation", Description: "The direction hint of one candidate (generate_components / Agent node count)."},
 	}
 }
 
