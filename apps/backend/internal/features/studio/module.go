@@ -19,7 +19,7 @@ var Module = fx.Options(
 	dbx.AsModel(&models.StudioDef{}),
 	dbx.AsModel(&models.StudioDefVersion{}),
 	fx.Provide(NewStore),
-	httpx.AsController(NewController),
+	httpx.AsController(newControllerFx),
 	fx.Invoke(Seed),
 )
 

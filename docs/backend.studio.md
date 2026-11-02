@@ -43,6 +43,18 @@ package's tests fail in this environment: root + Chrome sandbox — pre-existing
 Kinds: `model_set | agent | pipeline | skill | rule` — SINGULAR in CRUD paths; action routes use
 the plural forms the frontend calls. The kind string is the path segment verbatim.
 
+**Routing ownership (2026-11-02).** Only `studio.Controller` mounts the `/studio` subrouter (with
+`auth.Required` + `auth.Role("admin")`); chi panics if a second controller calls
+`r.Route("/studio", …)` on the same router. Other packages add routes into it through
+`studio.RouteExtender` (`StudioRoutes(r chi.Router)`, paths relative to `/studio`, already behind
+admin middleware), registered with `studio.AsRouteExtender(ctor)` (fx group `studio_routes`, collected
+by `newControllerFx`). `agentrun.Controller` is the extender for the preview/try/validate rows above;
+its own `Routes` only mounts `/agents/{slug}`. agentrun's module provides `*Controller` once and
+re-exposes it as both `httpx.Controller` and `studio.RouteExtender`. Static `agents`/`pipelines`
+segments win over `{kind}` in chi. `internal/app/app_test.go` `TestRouterBuilds` boots the full fx
+app (temp SQLite) and checks both route sets resolve — `fx.ValidateApp` alone doesn't run
+constructors, so it can't catch mount conflicts.
+
 ### Validation rules (validate.go)
 
 - model_set: strategy ∈ single|fallback|fanout; ≥1 entry; provider_id+model_id non-empty;
@@ -150,7 +162,8 @@ published_by "system". Idempotent by emptiness.
   `validate_component` wraps `component.Validate` (JSON report + formatted text). Terminal submit
   tools are built from the output contract and wrapped in `tool.AsTerminal` (Workstream B
   semantics: the tool's output string becomes the run's final answer).
-- **Endpoints** (controller.go): preview (draft-first), try (SSE framed exactly like
+- **Endpoints** (controller.go; preview/try/validate registered via `StudioRoutes` inside the
+  studio-owned `/studio` subrouter — see "Routing ownership"): preview (draft-first), try (SSE framed exactly like
   `agentkit/httpapi`: `event: <type>` + JSON data, 15s heartbeats, final `event: done` with `{}`,
   client disconnect cancels), `/studio/pipelines/{id}/validate`, chat mount `/agents/{slug}`
   (auth required, NOT admin; unpublished → 404; provider unconfigured → 503 `unavailable`; serves

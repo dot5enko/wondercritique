@@ -8,6 +8,7 @@ import (
 	"database/sql"
 
 	"github.com/dot5enko/wondercritique/apps/backend/agentkit/fxagent"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 	"go.uber.org/fx"
 	"gorm.io/gorm"
@@ -19,5 +20,7 @@ var Module = fx.Options(
 	fx.Provide(func(db *gorm.DB) (*sql.DB, error) { return db.DB() }),
 	fxagent.SQLiteStore(),
 	fx.Provide(NewRuntime),
-	httpx.AsController(NewController),
+	fx.Provide(NewController),
+	httpx.AsController(func(c *Controller) *Controller { return c }),
+	studio.AsRouteExtender(func(c *Controller) *Controller { return c }),
 )

@@ -35,16 +35,17 @@ func NewController(runtime *Runtime, store *studio.Store, mw *auth.Middleware) *
 	return &Controller{runtime: runtime, store: store, mw: mw}
 }
 
+// StudioRoutes registers the studio action routes (plural segments by
+// frontend contract). Mounted by the studio controller inside its single
+// `/studio` subrouter, which already applies auth + admin middleware.
+func (c *Controller) StudioRoutes(r chi.Router) {
+	r.Post("/agents/{id}/preview", httpx.Handle(c.preview))
+	r.Post("/agents/{id}/try", httpx.Handle(c.tryRun))
+	r.Post("/pipelines/{id}/validate", httpx.Handle(c.validatePipeline))
+}
+
 // Routes registers the runtime routes on r (mounted at /api/v1).
 func (c *Controller) Routes(r chi.Router) {
-	// Studio action routes (admin): plural segments by frontend contract.
-	r.Route("/studio", func(r chi.Router) {
-		r.Use(c.mw.Required, auth.Role("admin"))
-		r.Post("/agents/{id}/preview", httpx.Handle(c.preview))
-		r.Post("/agents/{id}/try", httpx.Handle(c.tryRun))
-		r.Post("/pipelines/{id}/validate", httpx.Handle(c.validatePipeline))
-	})
-
 	// Chat with any published agent (any authenticated user).
 	r.Route("/agents", func(r chi.Router) {
 		r.Use(c.mw.Required)

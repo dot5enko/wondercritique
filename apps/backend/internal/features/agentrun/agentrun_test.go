@@ -70,7 +70,13 @@ func setup(t *testing.T) *harness {
 
 	mw := auth.NewTestMiddleware("0123456789abcdef0123456789abcdef", testIssuer)
 	r := chi.NewRouter()
-	NewController(rt, defs, mw).Routes(r)
+	ctrl := NewController(rt, defs, mw)
+	ctrl.Routes(r)
+	// Mirrors the studio controller's /studio subrouter (admin middleware + extenders).
+	r.Route("/studio", func(r chi.Router) {
+		r.Use(mw.Required, auth.Role("admin"))
+		ctrl.StudioRoutes(r)
+	})
 
 	// admin token
 	token, err := mw.IssueAccessToken(&models.User{Base: models.Base{ID: "admin1"}, Role: "admin"})

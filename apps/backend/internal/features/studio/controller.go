@@ -15,24 +15,56 @@ import (
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/fx"
 	"gorm.io/gorm"
 )
 
 // Controller serves the studio definition API. Everything is admin-only.
 //
-// ROUTING NOTE: the definition CRUD uses SINGULAR kind segments
-// (/studio/model_set, /studio/agent, …) while the action routes owned by the
-// agentrun controller use the plural forms the frontend calls
-// (/studio/agents/{id}/preview|try, /studio/pipelines/{id}/validate).
+// ROUTING NOTE: this controller owns the single `/studio` subrouter (chi
+// panics if two controllers both mount `/studio`). Other packages contribute
+// routes into it via RouteExtender (see AsRouteExtender). The definition CRUD
+// uses SINGULAR kind segments (/studio/model_set, /studio/agent, …) while the
+// extender action routes (agentrun) use the plural forms the frontend calls
+// (/studio/agents/{id}/preview|try, /studio/pipelines/{id}/validate); chi
+// prefers the static `agents`/`pipelines` segments over `{kind}`.
 type Controller struct {
-	store *Store
-	llm   *llm.Service
-	mw    *auth.Middleware
+	store     *Store
+	llm       *llm.Service
+	mw        *auth.Middleware
+	extenders []RouteExtender
+}
+
+// RouteExtender contributes extra routes to the shared `/studio` subrouter.
+// Routes registered in StudioRoutes are relative to `/studio` and already run
+// behind the admin middleware.
+type RouteExtender interface {
+	StudioRoutes(r chi.Router)
+}
+
+// AsRouteExtender registers a constructor whose result is mounted inside the
+// studio subrouter.
+func AsRouteExtender(ctor any) fx.Option {
+	return fx.Provide(fx.Annotate(ctor, fx.As(new(RouteExtender)), fx.ResultTags(`group:"studio_routes"`)))
+}
+
+// ControllerParams are the fx dependencies of the studio controller.
+type ControllerParams struct {
+	fx.In
+	Store     *Store
+	LLM       *llm.Service
+	MW        *auth.Middleware
+	Extenders []RouteExtender `group:"studio_routes"`
+}
+
+// newControllerFx is the fx constructor (collects route extenders).
+func newControllerFx(p ControllerParams) *Controller {
+	return NewController(p.Store, p.LLM, p.MW, p.Extenders...)
 }
 
 // NewController builds the studio API controller.
-func NewController(store *Store, svc *llm.Service, mw *auth.Middleware) *Controller {
-	return &Controller{store: store, llm: svc, mw: mw}
+func NewController(store *Store, svc *llm.Service, mw *auth.Middleware, extenders ...RouteExtender) *Controller {
+	return &Controller{store: store, llm: svc, mw: mw, extenders: extenders}
 }
 
 // Routes registers the studio routes on r (mounted at /api/v1).
@@ -43,6 +75,10 @@ func (c *Controller) Routes(r chi.Router) {
 		r.Get("/catalog", httpx.Handle(c.getCatalog))
 		r.Get("/export", httpx.Handle(c.export))
 		r.Post("/import", httpx.Handle(c.importBundle))
+
+		for _, e := range c.extenders {
+			e.StudioRoutes(r)
+		}
 
 		r.Route("/{kind}", func(r chi.Router) {
 			r.Get("/", httpx.Handle(c.list))
