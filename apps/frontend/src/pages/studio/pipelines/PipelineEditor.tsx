@@ -302,15 +302,16 @@ function EditorBody({ def, catalog, agents, onBack, onDefSaved }: PipelineEditor
   const runValidation = useCallback(async () => {
     setValidating(true)
     try {
-      // The backend validates the saved draft — flush the pending autosave first.
-      await save((body) => putDraft('pipeline', def.id, body))
+      // The backend validates the saved draft (else the latest published body) —
+      // flush pending edits first, but never create a draft from a clean view.
+      if (dirty) await save((body) => putDraft('pipeline', def.id, body))
       const body = flowToBody(nodesRef.current, edgesRef.current)
       const local = lintBody(body, catalog)
       let issues = local
       let serverError = false
       try {
         const res = await validatePipeline(def.id)
-        issues = mergeIssues(res.issues, local)
+        issues = mergeIssues(Array.isArray(res.issues) ? res.issues : [], local)
       } catch {
         serverError = true
       }
@@ -332,7 +333,7 @@ function EditorBody({ def, catalog, agents, onBack, onDefSaved }: PipelineEditor
     } finally {
       setValidating(false)
     }
-  }, [catalog, def.id, save, setNodes, showFlash])
+  }, [catalog, def.id, dirty, save, setNodes, showFlash])
 
   /* ---------- version restore ---------- */
 

@@ -34,6 +34,8 @@ export interface VersionBarProps {
   dirty: boolean
   /** Called after a successful save/publish/restore so the page can refetch. */
   onSaved?: () => void
+  /** When set, Publish is disabled and this reason is shown (e.g. "Add at least one model"). */
+  publishBlocked?: string | null
   className?: string
 }
 
@@ -41,7 +43,16 @@ function message(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
-export function VersionBar({ kind, def, draft, onDraftLoaded, dirty, onSaved, className }: VersionBarProps) {
+export function VersionBar({
+  kind,
+  def,
+  draft,
+  onDraftLoaded,
+  dirty,
+  onSaved,
+  publishBlocked,
+  className,
+}: VersionBarProps) {
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -173,11 +184,13 @@ export function VersionBar({ kind, def, draft, onDraftLoaded, dirty, onSaved, cl
         >
           Save draft
         </Button>
+        {publishBlocked && <span className="text-xs text-ink-3">{publishBlocked}</span>}
         <Button
           size="sm"
           variant="primary"
           icon={<Upload />}
-          disabled={!def}
+          disabled={!def || !!publishBlocked}
+          title={publishBlocked ?? undefined}
           onClick={() => setPublishOpen(true)}
         >
           Publish

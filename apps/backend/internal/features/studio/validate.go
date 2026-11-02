@@ -26,13 +26,15 @@ const maxSkillFileBytes = 512 << 10
 func validateForDraft(kind string, body any) error {
 	switch kind {
 	case KindModelSet:
-		return validateModelSet(body.(ModelSetBody))
+		// Drafts may have zero entries (a fresh set is created empty and
+		// filled in the editor); publish requires at least one.
+		return validateModelSet(body.(ModelSetBody), false)
 	case KindAgent:
 		return validateAgentDraft(body.(AgentBody))
 	case KindSkill:
 		return validateSkill(body.(SkillBody))
 	case KindRule:
-		return validateRule(body.(RuleBody))
+		return validateRule(body.(RuleBody), false)
 	case KindPipeline:
 		return nil // structural decode only
 	}
@@ -43,13 +45,13 @@ func validateForDraft(kind string, body any) error {
 func validateForPublish(kind string, body any) error {
 	switch kind {
 	case KindModelSet:
-		return validateModelSet(body.(ModelSetBody))
+		return validateModelSet(body.(ModelSetBody), true)
 	case KindAgent:
 		return validateAgentDraft(body.(AgentBody))
 	case KindSkill:
 		return validateSkill(body.(SkillBody))
 	case KindRule:
-		return validateRule(body.(RuleBody))
+		return validateRule(body.(RuleBody), true)
 	case KindPipeline:
 		return nil // graph validation needs the catalog; callers use ValidatePipelineBody
 	}
@@ -64,14 +66,16 @@ func invalidf(format string, args ...any) *apperr.Error {
 
 /* ---------- model_set ---------- */
 
-func validateModelSet(b ModelSetBody) error {
+// validateModelSet checks a model-set body. requireEntries is false for draft
+// saves (an empty set is a valid work-in-progress) and true for publish/import.
+func validateModelSet(b ModelSetBody, requireEntries bool) error {
 	switch b.Strategy {
 	case "single", "fallback", "fanout":
 	default:
 		return invalidf("strategy %q must be single, fallback or fanout", b.Strategy)
 	}
-	if len(b.Entries) == 0 {
-		return invalid("at least one model entry is required")
+	if requireEntries && len(b.Entries) == 0 {
+		return invalid("add at least one model before publishing")
 	}
 	for i, e := range b.Entries {
 		if e.ProviderID == "" {
@@ -200,7 +204,9 @@ func validateSkillPath(p string) error {
 
 /* ---------- rule ---------- */
 
-func validateRule(b RuleBody) error {
+// validateRule checks a rule-set body. requireRules is false for draft saves
+// (a fresh set starts with an empty group) and true for publish/import.
+func validateRule(b RuleBody, requireRules bool) error {
 	if len(b.Groups) == 0 {
 		return invalid("at least one group is required")
 	}
@@ -208,7 +214,7 @@ func validateRule(b RuleBody) error {
 		if g.Name == "" {
 			return invalidf("group %d: name is required", gi)
 		}
-		if len(g.Rules) == 0 {
+		if requireRules && len(g.Rules) == 0 {
 			return invalidf("group %q: at least one rule is required", g.Name)
 		}
 		for ri, r := range g.Rules {

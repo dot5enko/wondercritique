@@ -10,7 +10,7 @@ import { Skeleton } from '../../../ui'
 import { useAsync, useDirtyDraft } from '../../../hooks'
 import {
   getCatalog,
-  getDef,
+  getEditableDef,
   putDraft,
   type AgentBody,
   type StudioCatalog,
@@ -18,10 +18,10 @@ import {
 } from '../../../api/studio'
 import { AgentForm } from './AgentForm'
 import { TryItPanel } from './TryItPanel'
-import { sensibleDefaultAgentBody } from './defaults'
+import { normalizeAgentBody } from './defaults'
 
 export function AgentEditor({ id }: { id: string }) {
-  const def = useAsync((signal) => getDef('agent', id, signal), [id])
+  const def = useAsync((signal) => getEditableDef('agent', id, signal), [id])
   const catalog = useAsync((signal) => getCatalog(signal), [])
 
   const ready = def.data != null && catalog.data != null
@@ -58,7 +58,7 @@ function EditorBody({
   catalog: StudioCatalog
   onReloadDef: () => void
 }) {
-  const dd = useDirtyDraft<AgentBody>(def.draft ?? sensibleDefaultAgentBody(), {
+  const dd = useDirtyDraft<AgentBody>(normalizeAgentBody(def.draft), {
     autosave: (body) => putDraft('agent', def.id, body),
   })
   const flushDraft = useCallback(() => dd.save((body) => putDraft('agent', def.id, body)), [dd.save, def.id])
@@ -70,7 +70,7 @@ function EditorBody({
         def={def}
         draft={dd.draft}
         dirty={dd.dirty}
-        onDraftLoaded={(body) => dd.reset((body as AgentBody | null) ?? sensibleDefaultAgentBody())}
+        onDraftLoaded={(body) => dd.reset(normalizeAgentBody(body as AgentBody | null))}
         onSaved={onReloadDef}
         className="sticky top-0 z-30"
       />
@@ -81,7 +81,7 @@ function EditorBody({
           description={def.description || <span className="font-mono">{def.slug}</span>}
         />
         <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <AgentForm def={def} catalog={catalog} dd={dd} flushDraft={flushDraft} />
+          <AgentForm def={def} catalog={catalog} dd={dd} flushDraft={flushDraft} onReloadDef={onReloadDef} />
           <TryItPanel def={def} catalog={catalog} dirty={dd.dirty} flushDraft={flushDraft} />
         </div>
       </div>

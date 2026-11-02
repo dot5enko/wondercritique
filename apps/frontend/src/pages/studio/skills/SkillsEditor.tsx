@@ -12,11 +12,11 @@ import { FileCode2, FilePlus2, FileText, Info, Pencil, Trash2, TriangleAlert } f
 import { Button, cx, EmptyState, Field, IconButton, Input, Textarea, Tooltip } from '../../../ui'
 import { ConfirmDialog, Loadable, Modal, PageHeader, VersionBar } from '../../../components'
 import { useAsync, useDirtyDraft } from '../../../hooks'
-import { getDef, putDraft, type SkillBody, type StudioDef } from '../../../api/studio'
+import { getEditableDef, putDraft, type SkillBody, type StudioDef } from '../../../api/studio'
 import { emptySkillBody, isSkillEntry, skillPathError } from './body'
 
 export default function SkillsEditor({ id }: { id: string }) {
-  const def = useAsync((signal) => getDef<'skill'>('skill', id, signal), [id])
+  const def = useAsync((signal) => getEditableDef<'skill'>('skill', id, signal), [id])
   return (
     <Loadable
       loading={def.loading && !def.data}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/auth"
@@ -75,6 +76,7 @@ func (c *Controller) Routes(r chi.Router) {
 		r.Get("/catalog", httpx.Handle(c.getCatalog))
 		r.Get("/export", httpx.Handle(c.export))
 		r.Post("/import", httpx.Handle(c.importBundle))
+		r.Get("/agents/usage", httpx.Handle(c.agentUsage))
 
 		for _, e := range c.extenders {
 			e.StudioRoutes(r)
@@ -84,6 +86,8 @@ func (c *Controller) Routes(r chi.Router) {
 			r.Get("/", httpx.Handle(c.list))
 			r.Post("/", httpx.Handle(c.create))
 			r.Get("/{id}", httpx.Handle(c.get))
+			r.Patch("/{id}", httpx.Handle(c.updateIdentity))
+			r.Delete("/{id}", httpx.Handle(c.deleteDef))
 			r.Put("/{id}/draft", httpx.Handle(c.putDraft))
 			r.Post("/{id}/publish", httpx.Handle(c.publish))
 			r.Get("/{id}/versions", httpx.Handle(c.versions))
@@ -294,6 +298,31 @@ func (c *Controller) get(w http.ResponseWriter, r *http.Request) error {
 	return httpx.JSON(w, http.StatusOK, def)
 }
 
+type updateIdentityBody struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// updateIdentity edits name/description (slug is immutable).
+func (c *Controller) updateIdentity(w http.ResponseWriter, r *http.Request) error {
+	kind, err := kindParam(r)
+	if err != nil {
+		return err
+	}
+	body, err := httpx.Decode[updateIdentityBody](r)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(body.Name) == "" {
+		return invalid("name is required")
+	}
+	def, err := c.store.UpdateIdentity(r.Context(), kind, chi.URLParam(r, "id"), strings.TrimSpace(body.Name), body.Description)
+	if err != nil {
+		return err
+	}
+	return httpx.JSON(w, http.StatusOK, def)
+}
+
 func (c *Controller) putDraft(w http.ResponseWriter, r *http.Request) error {
 	kind, err := kindParam(r)
 	if err != nil {
@@ -333,7 +362,7 @@ func (c *Controller) publish(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if len(def.Draft) == 0 {
-		return invalid("no draft to publish")
+		return invalid("nothing to publish: there are no unpublished changes to the body (name/description edits apply immediately and are not versioned)")
 	}
 	typed, err := c.decodeBodyFor(r.Context(), kind, def.Draft, true)
 	if err != nil {

@@ -30,6 +30,9 @@ package's tests fail in this environment: root + Chrome sandbox — pre-existing
 | `GET /studio/{kind}` | `{items: [StudioDef...], next_cursor: null}`, oldest first, `?limit`/`?offset` |
 | `POST /studio/{kind}` | `{slug, name, description?, draft}` → 201; slug `^[a-z0-9][a-z0-9-]{0,99}$`; dup slug → 409 |
 | `GET /studio/{kind}/{id}` | def; 404 otherwise |
+| `PATCH /studio/{kind}/{id}` | `{name, description}` (name required) → refreshed def; slug immutable (2026-11-02) |
+| `DELETE /studio/{kind}/{id}` | **agents only** (other kinds → 400); hard-deletes def + versions (slug reusable); 409 "agent … is used in pipelines: …" while referenced; 204 (2026-11-02, `usage.go`) |
+| `GET /studio/agents/usage` | `{usage: {agentDefID: [{id,slug,name}]}}` — pipelines referencing the agent in their draft OR latest published version (older versions don't count); static route registered before `/{kind}` |
 | `PUT /studio/{kind}/{id}/draft` | body IS the typed body; validated (pipelines: structural decode only) → refreshed def |
 | `POST /studio/{kind}/{id}/publish` | `{note}`; 400 "no draft to publish"; full validation → StudioVersion |
 | `GET /studio/{kind}/{id}/versions[/{v}]` | versions newest first |
@@ -38,7 +41,7 @@ package's tests fail in this environment: root + Chrome sandbox — pre-existing
 | `GET /studio/export` / `POST /studio/import` | JSON bundle `{version:1, exported_at, defs:[{kind,slug,name,description,body,version?}]}` |
 | `POST /studio/agents/{id}/preview` | `{input}` → `{system, input}` (no model call; draft-first) |
 | `POST /studio/agents/{id}/try` | `{input}` → SSE run stream (ephemeral in-memory session) |
-| `POST /studio/pipelines/{id}/validate` | `{ok, issues}` (draft, else latest published) |
+| `POST /studio/pipelines/{id}/validate` | `{ok, issues}` (draft, else latest published); `issues` is always an array (`[]` when clean, never `null`) |
 
 Kinds: `model_set | agent | pipeline | skill | rule` — SINGULAR in CRUD paths; action routes use
 the plural forms the frontend calls. The kind string is the path segment verbatim.
@@ -57,16 +60,22 @@ constructors, so it can't catch mount conflicts.
 
 ### Validation rules (validate.go)
 
-- model_set: strategy ∈ single|fallback|fanout; ≥1 entry; provider_id+model_id non-empty;
-  `reasoning_effort` ∈ minimal|low|medium|high|xhigh; `max_output_tokens` ≥ 0. No catalog lookup
-  at save time (runtime enforces enablement).
+- model_set (`validateModelSet(body, requireEntries)`): strategy ∈ single|fallback|fanout;
+  provider_id+model_id non-empty; `reasoning_effort` ∈ minimal|low|medium|high|xhigh;
+  `max_output_tokens` ≥ 0. **≥1 entry only on publish/import** (2026-11-02) — create/draft PUT
+  accept an empty `entries` list, so a new set is created empty ("inactive" = unpublished) and filled
+  in the editor; publish of an empty set → 400 "add at least one model before publishing". No
+  catalog lookup at save time (runtime enforces enablement; an unpublished empty set has no
+  buildable entry, so the runtime's draft fallback fails for it).
 - agent: model_set_id must exist (any state); contract type artifact|critique|custom; custom needs
   a JSON object schema with non-empty `properties`; limits ≥ 0; tools ⊆ catalog tool names;
   skill_ids/rule_ids must reference existing defs (checked in the controller against the store).
 - skill: ≥1 file; exactly one root-level `SKILL.md`; paths relative with vfs.Clean semantics (no
   leading `/`, no `.`/`..`, no empty segments); unique; ≤ 512 KiB per file.
-- rule: ≥1 group; group name non-empty; ≥1 rule per group; text non-empty; severity ∈
-  info|warning|error; validator_code free-form.
+- rule (`validateRule(body, requireRules)`): ≥1 group; group name non-empty; text non-empty; severity ∈
+  info|warning|error; validator_code free-form. ≥1 rule per group is required only on publish/import
+  (drafts may have empty groups, so a new rule set is created "inactive" with an empty "General" group).
+  Updated 2026-11-02.
 - pipeline: full validation runs on publish and on `/validate` (`ValidatePipelineBody(ctx, body,
   *CatalogData) []PipelineIssue`, issues `{node_id, message, severity: error|warning}`): unique
   node ids, ≥1 node, edges reference existing nodes+ports, port-type compatibility, at most one
@@ -144,8 +153,12 @@ published_by "system". Idempotent by emptiness.
   `llm.ImageBlock`s after the text (in preview: `[image: {name}]`).
 - **Body resolution**: Try/preview use the agent's DRAFT when present, else latest published; chat
   mount uses latest published only (404 unpublished). Model set: latest published body, fallback
-  draft; single/fanout → first buildable entry, fallback walks the order on provider-build failure.
-  (Parallel fanout is an engine concern, out of scope — noted in code.)
+  draft; ALL strategies walk the entries in order and skip those whose provider is unavailable
+  (disabled / no key); the first buildable entry runs (single/fanout run just it).
+  (Parallel fanout is an engine concern, out of scope — noted in code.) Provider failures are
+  re-wrapped (same code/status) as `model set "{slug}" ({strategy}): {provider}/{model}: {reason};
+  enable the provider and set its API key under Providers, or pick another model…` listing every
+  entry tried (updated 2026-11-02).
 - **Agent construction** (runtime.go): one `*agentkit.Agent` per (def id, published version)
   cached under a mutex (`builds` map, key `defID|version`, version 0 = draft build). Config:
   Name = slug (or `try:{id}`), Provider from the llm Service, Model = entry.model_id, assembled

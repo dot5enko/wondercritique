@@ -31,6 +31,19 @@ export function sensibleDefaultAgentBody(): AgentBody {
   }
 }
 
+/** Fills defaults and turns null lists (Go nil slices) into empty arrays. */
+export function normalizeAgentBody(body: AgentBody | null | undefined): AgentBody {
+  const base = sensibleDefaultAgentBody()
+  if (!body) return base
+  return {
+    ...base,
+    ...body,
+    tools: body.tools ?? [],
+    skill_ids: body.skill_ids ?? [],
+    rule_ids: body.rule_ids ?? [],
+  }
+}
+
 /**
  * Sample input seeding both "Show assembled prompt" and Try it: one
  * `'sample'` value per catalog prompt variable (plan §4.3/§4.4).

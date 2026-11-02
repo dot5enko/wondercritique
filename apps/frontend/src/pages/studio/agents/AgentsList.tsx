@@ -3,19 +3,45 @@
  * name, slug, description, latest published version, last draft update.
  */
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
-import { Bot, MessageSquare } from 'lucide-react'
-import { Badge, Button, Tooltip } from '../../../ui'
+import { Bot, Trash2 } from 'lucide-react'
+import { Badge, IconButton, Tooltip } from '../../../ui'
 import { Callout } from '../../../ui/Display'
-import { ErrorState, ListPage, absoluteTime, isBackendMissing, relativeTime } from '../../../components'
+import { ConfirmDialog, ErrorState, ListPage, absoluteTime, isBackendMissing, relativeTime } from '../../../components'
 import { useAsync } from '../../../hooks'
-import { listDefs, type StudioDef } from '../../../api/studio'
+import { deleteAgent, getAgentUsage, listDefs, type StudioDef } from '../../../api/studio'
 import { NewAgentModal } from './NewAgentModal'
 
 export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => void }) {
   const defs = useAsync((signal) => listDefs('agent', undefined, signal), [])
+  const usageQ = useAsync((signal) => getAgentUsage(signal), [])
+  const usage = usageQ.data?.usage
   const [createOpen, setCreateOpen] = useState(false)
-  const navigate = useNavigate()
+  const [deleting, setDeleting] = useState<StudioDef<'agent'> | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  const closeDelete = () => {
+    setDeleting(null)
+    setDeleteError(null)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleting) return
+    setBusy(true)
+    setDeleteError(null)
+    try {
+      await deleteAgent(deleting.id)
+      closeDelete()
+      defs.reload()
+      usageQ.reload()
+    } catch (e) {
+      // 409: a pipeline started using it meanwhile — refresh the Used in column.
+      setDeleteError(e instanceof Error ? e.message : 'Could not delete the agent.')
+      usageQ.reload()
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-6xl p-5">
@@ -62,6 +88,24 @@ export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => vo
                 render: (d) => <span className="block truncate text-ink-2">{d.description || '—'}</span>,
               },
               {
+                key: 'used_in',
+                header: 'Used in',
+                width: 'w-56',
+                render: (d) => {
+                  if (usage == null) return <span className="text-ink-3">…</span>
+                  const refs = usage[d.id] ?? []
+                  if (refs.length === 0) return <span className="text-ink-3">Unused</span>
+                  return (
+                    <Tooltip content={refs.map((p) => p.name).join(', ')} side="top">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-ink-2">{refs[0].name}</span>
+                        {refs.length > 1 && <Badge tone="neutral">+{refs.length - 1}</Badge>}
+                      </span>
+                    </Tooltip>
+                  )
+                },
+              },
+              {
                 key: 'latest_version',
                 header: 'Version',
                 width: 'w-20',
@@ -78,23 +122,35 @@ export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => vo
                 ),
               },
               {
-                key: 'chat',
+                key: 'actions',
                 header: '',
-                width: 'w-20',
-                render: (d) =>
-                  d.latest_version != null ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<MessageSquare />}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        navigate(`/agent-chat?agent=${d.slug}`)
-                      }}
-                    >
-                      Chat
-                    </Button>
-                  ) : null,
+                width: 'w-12',
+                render: (d) => {
+                  const refs = usage?.[d.id] ?? []
+                  const blocked = usage == null || refs.length > 0
+                  return (
+                    <span onClick={(e) => e.stopPropagation()} className="flex justify-end">
+                      <Tooltip
+                        content={
+                          usage == null
+                            ? 'Checking usage…'
+                            : refs.length > 0
+                              ? `Used in ${refs.length} pipeline${refs.length > 1 ? 's' : ''} — remove it there first`
+                              : 'Delete agent'
+                        }
+                        side="top"
+                      >
+                        <IconButton
+                          icon={<Trash2 />}
+                          label="Delete agent"
+                          size="sm"
+                          disabled={blocked}
+                          onClick={() => setDeleting(d)}
+                        />
+                      </Tooltip>
+                    </span>
+                  )
+                },
               },
             ]}
             rows={defs.data?.items}
@@ -103,10 +159,29 @@ export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => vo
             emptyState={{
               icon: Bot,
               title: 'No agents yet',
-              description: 'Create an agent to use it in pipelines and chat.',
+              description: 'Create an agent to use it in pipelines.',
             }}
           />
           <NewAgentModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={onOpen} />
+          <ConfirmDialog
+            open={deleting != null}
+            onClose={closeDelete}
+            title="Delete agent"
+            danger
+            busy={busy}
+            confirmLabel="Delete agent"
+            onConfirm={confirmDelete}
+            body={
+              <div className="flex flex-col gap-2">
+                <p>
+                  Delete <span className="font-medium text-ink">{deleting?.name}</span>{' '}
+                  <span className="font-mono text-xs text-ink-3">({deleting?.slug})</span>? Its draft and all
+                  published versions are removed permanently. This can't be undone.
+                </p>
+                {deleteError != null && <p className="text-sm text-danger">{deleteError}</p>}
+              </div>
+            }
+          />
         </>
       )}
     </div>

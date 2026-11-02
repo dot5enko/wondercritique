@@ -161,6 +161,9 @@ func (c *Controller) validatePipeline(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	issues := studio.ValidatePipelineBody(r.Context(), body, cat)
+	if issues == nil {
+		issues = []studio.PipelineIssue{} // JSON `[]`, never `null`
+	}
 	return httpx.JSON(w, http.StatusOK, pipelineValidation{OK: len(issues) == 0, Issues: issues})
 }
 

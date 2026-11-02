@@ -7,8 +7,7 @@
  *   /          (auth shell)         → redirect to /chat
  *   /chat                           design chat: every chat = a pipeline run
  *   /runs/:id                       full run details (opened from the chat); /runs → /chat
- *   /agent-chat                     talk to a single published agent
- *   /studio/*, /settings            admin-only configuration
+ *   /studio/*, /settings/providers  admin-only configuration (settings sidebar); /settings → providers
  *
  * All pages are React.lazy code-split; `RequireAuth`/`RequireAdmin` guard the
  * shell and admin subtrees (src/features/auth.tsx).
@@ -22,7 +21,6 @@ const LoginPage = lazy(() => import('./pages/login'))
 const ShowcasePage = lazy(() => import('./pages/showcase'))
 const RunDetailPage = lazy(() => import('./pages/runs/detail'))
 const ChatPage = lazy(() => import('./pages/chat'))
-const AgentChatPage = lazy(() => import('./pages/agent-chat'))
 const SettingsPage = lazy(() => import('./pages/settings'))
 const PipelinesPage = lazy(() => import('./pages/studio/pipelines'))
 const AgentsPage = lazy(() => import('./pages/studio/agents'))
@@ -54,7 +52,6 @@ const router = createBrowserRouter([
           { path: 'chat', element: <ChatPage /> },
           { path: 'runs', loader: () => redirect('/chat') },
           { path: 'runs/:id', element: <RunDetailPage /> },
-          { path: 'agent-chat', element: <AgentChatPage /> },
           {
             path: 'studio/pipelines',
             element: (
@@ -95,8 +92,9 @@ const router = createBrowserRouter([
               </RequireAdmin>
             ),
           },
+          { path: 'settings', loader: () => redirect('/settings/providers') },
           {
-            path: 'settings',
+            path: 'settings/providers',
             element: (
               <RequireAdmin>
                 <SettingsPage />

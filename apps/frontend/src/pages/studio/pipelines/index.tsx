@@ -12,7 +12,7 @@ import { Workflow } from 'lucide-react'
 import { Button, Field, Input, Segmented, Spinner, Textarea } from '../../../ui'
 import { Callout } from '../../../ui/Display'
 import { ErrorState, ListPage, Modal, relativeTime, isBackendMissing } from '../../../components'
-import { createDef, getCatalog, getDef, listDefs, type StudioDef } from '../../../api/studio'
+import { createDef, getCatalog, getEditableDef, listDefs, type StudioDef } from '../../../api/studio'
 import { useAsync } from '../../../hooks'
 import { designLoopTemplate, emptyPipelineBody } from './flow'
 import PipelineEditor from './PipelineEditor'
@@ -214,7 +214,7 @@ function PipelineEditorPage({ id, onBack }: { id: string; onBack: () => void }) 
   const load = useAsync(
     async (signal) => {
       const [def, catalog, agents] = await Promise.all([
-        getDef('pipeline', id, signal),
+        getEditableDef('pipeline', id, signal),
         getCatalog(signal),
         listDefs('agent', undefined, signal)
           .then((r) => r.items)

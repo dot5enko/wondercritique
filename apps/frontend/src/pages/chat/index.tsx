@@ -28,7 +28,7 @@ import {
   type RunStatus,
 } from '../../api/runs'
 import { getDef, getVersion, listDefs, type PipelineBody } from '../../api/studio'
-import { groupThreads, ThreadRail } from './rail'
+import { useThreads } from './threads'
 import { RunCard } from './RunCard'
 import { parseInputFields } from '../runs/NewRunModal'
 import { RunDetailView } from '../runs/detail'
@@ -48,10 +48,9 @@ export default function ChatPage() {
   const [params, setSearchParams] = useSearchParams()
   const threadId = params.get('thread')
 
-  /* ---------- thread rail ---------- */
+  /* ---------- thread list (shared with the Shell sidebar) ---------- */
 
-  const threadsQ = useAsync((signal) => listRuns({ limit: 100 }, signal), [])
-  const threads = useMemo(() => groupThreads(threadsQ.data?.items ?? []), [threadsQ.data])
+  const { query: threadsQ, threads } = useThreads()
   const backendMissing = threadsQ.error != null && isBackendMissing(threadsQ.error)
 
   /* ---------- active thread timeline ---------- */
@@ -225,11 +224,8 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [entries.length, threadId])
 
-  const openThread = (id: string): void => setSearchParams({ thread: id })
-  const newChat = (): void => {
-    setSendError(null)
-    setSearchParams({})
-  }
+  // Switching chats (incl. "New chat" in the sidebar) clears a stale send error.
+  useEffect(() => setSendError(null), [threadId])
   const activeThread = threads.find((t) => t.id === threadId) ?? null
 
   const drawerRunId = params.get('run')
@@ -252,30 +248,14 @@ export default function ChatPage() {
         </div>
       ) : (
         <>
-          <ThreadRail
-            threads={threads}
-            loading={threadsQ.loading}
-            error={threadsQ.error}
-            activeId={threadId}
-            creating={false}
-            onNew={newChat}
-            onSelect={openThread}
-            onRetry={() => threadsQ.reload()}
-          />
-
           <div className="flex min-w-0 flex-1 flex-col">
-            {/* header */}
-            <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5">
-              <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
-                {activeThread ? activeThread.title : 'Design chat'}
-              </p>
-              {activeThread && <Badge tone="neutral">{activeThread.runs} runs</Badge>}
-              {threadId && (
-                <Button size="sm" variant="secondary" onClick={newChat}>
-                  New chat
-                </Button>
-              )}
-            </div>
+            {/* header — only for an open thread ("New chat" lives in the sidebar) */}
+            {activeThread && (
+              <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5">
+                <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{activeThread.title}</p>
+                {activeThread.runs > 1 && <Badge tone="neutral">{activeThread.runs} runs</Badge>}
+              </div>
+            )}
 
             {/* timeline */}
             <div className="min-h-0 flex-1 overflow-y-auto">

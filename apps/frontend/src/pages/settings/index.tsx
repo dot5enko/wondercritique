@@ -9,8 +9,8 @@
  * The Go backend for these routes does not exist yet — loading, error and
  * empty states render gracefully against 404/502.
  */
-import { useEffect, useMemo, useState } from 'react'
 import { Boxes, PlugZap, RefreshCw, Search } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   getProviders,
   mergeProviders,
@@ -19,7 +19,7 @@ import {
 } from '../../api/settings'
 import { Loadable, PageHeader, absoluteTime, relativeTime } from '../../components'
 import { useAsync } from '../../hooks'
-import { Badge, Button, Callout, EmptyState, Input, cx } from '../../ui'
+import { Badge, Button, EmptyState, Input, cx } from '../../ui'
 import ProviderDetail from './ProviderDetail'
 import { AdapterBadge } from './parts'
 
@@ -73,10 +73,6 @@ export default function SettingsPage() {
         title="LLM providers"
         description="Enable providers, store API keys and set rate limits — sourced from the models.dev catalog."
       />
-      <Callout tone="info" className="mt-3 shrink-0">
-        The provider catalog syncs from models.dev. API keys are stored AES-GCM-encrypted and never returned —
-        set a key per provider here, or provide the provider's environment variable on the server as a fallback.
-      </Callout>
 
       <Loadable loading={loading && data === null} error={error} onRetry={reload} className="mt-4 min-h-0 flex-1">
         <div className="grid h-full min-h-0 grid-cols-[340px_minmax(0,1fr)] gap-4">

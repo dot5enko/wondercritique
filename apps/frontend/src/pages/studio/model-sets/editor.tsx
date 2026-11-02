@@ -7,10 +7,10 @@
 import { useEffect, useState } from 'react'
 import { useAsync, useDirtyDraft } from '../../../hooks'
 import type { UseAsyncResult } from '../../../hooks'
-import { getDef, putDraft } from '../../../api/studio'
+import { getEditableDef, putDraft } from '../../../api/studio'
 import type { ModelSetBody, StudioCatalog } from '../../../api/studio'
-import { ErrorState, PageHeader, VersionBar } from '../../../components'
-import { Button, Callout, Card, CardBody, CardHeader, Checkbox, Field, Input, Segmented, Skeleton, Textarea } from '../../../ui'
+import { ErrorState, IdentityCard, PageHeader, VersionBar } from '../../../components'
+import { Button, Callout, Card, CardBody, CardHeader, Checkbox, Segmented, Skeleton } from '../../../ui'
 import { EntryList } from './entries'
 
 const EMPTY_BODY: ModelSetBody = { strategy: 'single', entries: [] }
@@ -27,7 +27,7 @@ export interface ModelSetEditorProps {
 }
 
 export function ModelSetEditor({ id, catalog }: ModelSetEditorProps) {
-  const defQ = useAsync((signal) => getDef('model_set', id, signal), [id])
+  const defQ = useAsync((signal) => getEditableDef('model_set', id, signal), [id])
   const def = defQ.data
 
   const draft = useDirtyDraft<ModelSetBody>(def?.draft ?? EMPTY_BODY, {
@@ -76,6 +76,7 @@ export function ModelSetEditor({ id, catalog }: ModelSetEditorProps) {
         dirty={draft.dirty}
         onDraftLoaded={(body) => draft.reset((body as ModelSetBody | null) ?? EMPTY_BODY)}
         onSaved={defQ.reload}
+        publishBlocked={draft.draft.entries.length === 0 ? 'Add at least one model to publish' : null}
         className="sticky top-0 z-20"
       />
 
@@ -94,20 +95,7 @@ export function ModelSetEditor({ id, catalog }: ModelSetEditorProps) {
         )}
 
         <div className="space-y-3">
-          <Card>
-            <CardHeader title="Identity" description="Slug and name are set when the definition is created." />
-            <CardBody className="space-y-3">
-              <Field label="Name">
-                <Input value={def.name} readOnly className="cursor-default" />
-              </Field>
-              <Field label="Slug" hint="Referenced by agents, Agent nodes and exports.">
-                <Input value={def.slug} readOnly className="cursor-default font-mono text-xs" />
-              </Field>
-              <Field label="Description">
-                <Textarea value={def.description} readOnly rows={2} className="cursor-default resize-none" />
-              </Field>
-            </CardBody>
-          </Card>
+          <IdentityCard kind="model_set" def={def} slugHint="Referenced by agents, Agent nodes and exports." onSaved={defQ.reload} />
 
           <Card>
             <CardHeader title="Strategy" description="How the set behaves when an agent needs a model." />

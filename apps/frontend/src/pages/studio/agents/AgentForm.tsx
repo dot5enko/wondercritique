@@ -23,7 +23,7 @@ import {
   Textarea,
   Tooltip,
 } from '../../../ui'
-import { Modal } from '../../../components'
+import { IdentityCard, Modal } from '../../../components'
 import {
   previewAgent,
   type AgentBody,
@@ -48,6 +48,8 @@ export interface AgentFormProps {
   dd: DirtyDraft<AgentBody>
   /** Saves the draft immediately — used before previewing so the assembled prompt matches the screen. */
   flushDraft: () => Promise<void>
+  /** Reloads the def after an identity (name/description) edit. */
+  onReloadDef: () => void
 }
 
 type PromptField = 'system_prompt' | 'input_template'
@@ -244,7 +246,7 @@ function PreviewModal({
 
 /* ---------- main form ---------- */
 
-export function AgentForm({ def, catalog, dd, flushDraft }: AgentFormProps) {
+export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFormProps) {
   const { draft, setDraft, dirty } = dd
   const [previewOpen, setPreviewOpen] = useState(false)
 
@@ -340,20 +342,7 @@ export function AgentForm({ def, catalog, dd, flushDraft }: AgentFormProps) {
   return (
     <div className="space-y-4">
       {/* Identity */}
-      <Card>
-        <CardHeader title="Identity" description="Fixed at creation — the slug is the agent's API identity." />
-        <CardBody className="space-y-3">
-          <Field label="Name">
-            <Input value={def.name} readOnly />
-          </Field>
-          <Field label="Description" optional>
-            <Input value={def.description} readOnly />
-          </Field>
-          <Field label="Slug" hint="Used in API paths, e.g. /api/v1/agents/{slug}/runs.">
-            <Input value={def.slug} readOnly className="font-mono text-xs" />
-          </Field>
-        </CardBody>
-      </Card>
+      <IdentityCard kind="agent" def={def} slugHint="Used in API paths, e.g. /api/v1/agents/{slug}/runs." onSaved={onReloadDef} />
 
       {/* Model set */}
       <Card>

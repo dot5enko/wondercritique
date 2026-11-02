@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -185,26 +186,41 @@ func (r *Runtime) resolveModelSet(ctx context.Context, modelSetID string, draftF
 	if len(body.Entries) == 0 {
 		return nil, nil, apperr.Unavailable("model set has no entries")
 	}
-	order := []studio.ModelSetEntry{body.Entries[0]} // single and fanout: the first entry
-	if body.Strategy == "fallback" {
-		order = body.Entries
-	}
+	// Every strategy walks the entries in order and skips those whose provider
+	// is unavailable (disabled, no key, …); the first buildable entry wins.
+	// single/fanout then run just that entry (parallel fanout isn't implemented).
 	var lastErr error
-	for i, entry := range order {
+	var tried []string
+	for _, entry := range body.Entries {
 		provider, err := r.providerFor(ctx, entry.ProviderID)
 		if err != nil {
 			lastErr = err
-			if body.Strategy == "fallback" && i < len(order)-1 {
-				continue // walk the order on provider-build failure
-			}
-			break
+			tried = append(tried, fmt.Sprintf("%s/%s: %s", entry.ProviderID, entry.ModelID, reasonOf(err)))
+			continue
 		}
 		return provider, &entry, nil
 	}
 	if lastErr != nil {
-		return nil, nil, lastErr
+		// Keep the original error code/status, but say which model set and
+		// which provider/model failed, and where to fix it.
+		msg := fmt.Sprintf("model set %q (%s): %s; enable the provider and set its API key under Providers, or pick another model in the model set",
+			def.Slug, body.Strategy, strings.Join(tried, "; "))
+		var ae *apperr.Error
+		if errors.As(lastErr, &ae) {
+			return nil, nil, apperr.New(ae.Status, ae.Code, msg)
+		}
+		return nil, nil, fmt.Errorf("%s: %w", msg, lastErr)
 	}
 	return nil, nil, apperr.Unavailable("no buildable model entry")
+}
+
+// reasonOf returns the client-safe message of an apperr, else the error text.
+func reasonOf(err error) string {
+	var ae *apperr.Error
+	if errors.As(err, &ae) {
+		return ae.Message
+	}
+	return err.Error()
 }
 
 /* ---------- agent construction ---------- */

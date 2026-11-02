@@ -1,23 +1,30 @@
 /**
- * Authenticated app shell — viewport frame + sidebar navigation + routed
- * content. Nav sections: Workspace (Design chat — every chat is a pipeline run),
- * Configure (admin: pipelines, agents and what agents use) and Admin (settings).
+ * Authenticated app shell — viewport frame + sidebar + routed content.
+ *
+ * The sidebar is always exactly one level deep and has two modes:
+ *  - **Chats** (everything outside settings): "New chat" + the list of design
+ *    chats; footer = Settings entry (admin) + signed-in user.
+ *  - **Settings** (`/studio/*`, `/settings/*`, admin only): "Back to chats" +
+ *    a flat list of configuration pages.
  */
-import { Outlet, useLocation, useNavigate } from 'react-router'
+import { Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
 import {
+  ArrowLeft,
   BookOpen,
   Bot,
+  KeyRound,
   Layers,
   LogOut,
-  MessageSquare,
-  MessagesSquare,
   Settings,
   ShieldCheck,
+  SquarePen,
   Workflow,
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '../features/auth'
 import { Avatar, Badge, IconButton, NavItem, Sidebar, SidebarSection } from '../ui'
+import { ThreadList } from './chat/rail'
+import { ThreadsProvider, useThreads } from './chat/threads'
 
 interface NavEntry {
   path: string
@@ -25,79 +32,100 @@ interface NavEntry {
   icon: LucideIcon
 }
 
-const NAV_MAIN: NavEntry[] = [{ path: '/chat', label: 'Design chat', icon: MessageSquare }]
-
-/** Configure = what runs (pipelines) and who runs it (agents + what agents use). */
-const NAV_CONFIGURE: NavEntry[] = [
+/** Settings sidebar: what runs (pipelines), who runs it (agents) and what they use. */
+const NAV_SETTINGS: NavEntry[] = [
   { path: '/studio/pipelines', label: 'Pipelines', icon: Workflow },
   { path: '/studio/agents', label: 'Agents', icon: Bot },
-]
-
-const NAV_AGENT_PARTS: NavEntry[] = [
   { path: '/studio/model-sets', label: 'Models', icon: Layers },
+  { path: '/settings/providers', label: 'Providers', icon: KeyRound },
   { path: '/studio/skills', label: 'Skills', icon: BookOpen },
   { path: '/studio/rules', label: 'Rules', icon: ShieldCheck },
-  { path: '/agent-chat', label: 'Agent chat', icon: MessagesSquare },
 ]
 
-const NAV_ADMIN: NavEntry[] = [{ path: '/settings', label: 'Settings', icon: Settings }]
+/** Where the "Settings" entry lands. */
+const SETTINGS_HOME = NAV_SETTINGS[0].path
 
-function NavItems({ entries, pathname }: { entries: NavEntry[]; pathname: string }) {
-  const navigate = useNavigate()
-  return (
-    <>
-      {entries.map(({ path, label, icon }) => (
-        <NavItem
-          key={path}
-          icon={icon}
-          label={label}
-          active={pathname === path || pathname.startsWith(`${path}/`)}
-          onClick={() => navigate(path)}
-        />
-      ))}
-    </>
-  )
+function isSettingsPath(pathname: string): boolean {
+  return pathname.startsWith('/studio/') || pathname === '/settings' || pathname.startsWith('/settings/')
 }
 
 export default function Shell() {
   const { user } = useAuth()
   const { pathname } = useLocation()
-  const isAdmin = user?.role === 'admin'
+  const settingsMode = user?.role === 'admin' && isSettingsPath(pathname)
 
   return (
-    <div className="h-dvh w-dvw bg-page p-2.5">
-      <div className="flex h-full w-full overflow-hidden rounded-xl border border-line bg-surface shadow-xs">
-        <Sidebar title="Wonder Critique" footer={<UserFooter />}>
-          <SidebarSection title="Workspace">
-            <NavItems entries={NAV_MAIN} pathname={pathname} />
-          </SidebarSection>
+    <ThreadsProvider>
+      <div className="h-dvh w-dvw bg-page p-2.5">
+        <div className="flex h-full w-full overflow-hidden rounded-xl border border-line bg-surface shadow-xs">
+          {settingsMode ? <SettingsSidebar pathname={pathname} /> : <ChatsSidebar pathname={pathname} />}
 
-          {isAdmin && (
-            <SidebarSection title="Configure">
-              <NavItems entries={NAV_CONFIGURE} pathname={pathname} />
-            </SidebarSection>
-          )}
-
-          {isAdmin && (
-            <SidebarSection title="Used by agents">
-              <NavItems entries={NAV_AGENT_PARTS} pathname={pathname} />
-            </SidebarSection>
-          )}
-
-          {isAdmin && (
-            <SidebarSection title="Admin">
-              <NavItems entries={NAV_ADMIN} pathname={pathname} />
-            </SidebarSection>
-          )}
-        </Sidebar>
-
-        <main className="flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <Outlet />
-          </div>
-        </main>
+          <main className="flex min-w-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <Outlet />
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
+    </ThreadsProvider>
+  )
+}
+
+function ChatsSidebar({ pathname }: { pathname: string }) {
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const { user } = useAuth()
+  const { query, threads } = useThreads()
+  const onChat = pathname === '/chat'
+  const activeId = onChat ? params.get('thread') : null
+
+  return (
+    <Sidebar
+      title="Wonder Critique"
+      className="w-60"
+      actions={<IconButton icon={<SquarePen />} label="New chat" size="sm" onClick={() => navigate('/chat')} />}
+      footer={
+        <div className="space-y-1">
+          {user?.role === 'admin' && (
+            <NavItem icon={Settings} label="Settings" onClick={() => navigate(SETTINGS_HOME)} />
+          )}
+          <UserFooter />
+        </div>
+      }
+    >
+      <SidebarSection title="Chats">
+        <ThreadList
+          threads={threads}
+          loading={query.loading && query.data == null}
+          error={query.error}
+          activeId={activeId}
+          onSelect={(id) => navigate(`/chat?thread=${encodeURIComponent(id)}`)}
+          onRetry={query.reload}
+        />
+      </SidebarSection>
+    </Sidebar>
+  )
+}
+
+function SettingsSidebar({ pathname }: { pathname: string }) {
+  const navigate = useNavigate()
+  return (
+    <Sidebar title="Settings" className="w-60" footer={<UserFooter />}>
+      <div className="mb-2 pt-1">
+        <NavItem icon={ArrowLeft} label="Back to chats" onClick={() => navigate('/chat')} />
+      </div>
+      <div className="space-y-0.5">
+        {NAV_SETTINGS.map(({ path, label, icon }) => (
+          <NavItem
+            key={path}
+            icon={icon}
+            label={label}
+            active={pathname === path || pathname.startsWith(`${path}/`)}
+            onClick={() => navigate(path)}
+          />
+        ))}
+      </div>
+    </Sidebar>
   )
 }
 

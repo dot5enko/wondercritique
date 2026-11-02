@@ -36,17 +36,26 @@ pipeline editor onboarding). Base stack unchanged.
 | `/` | auth | redirect → `/chat` |
 | `/chat` | auth | **Design chat** — every chat is a pipeline run (`src/pages/chat/`, see `docs/frontend.studio-ui.md`) |
 | `/runs/:id` | auth | full run detail (`RunDetailView` from `src/pages/runs/detail.tsx`; also embedded in the chat drawer). `/runs` redirects to `/chat` — the run list was removed; history lives in the chat rail |
-| `/agent-chat` | auth | talk to a single published agent (the old chat page, moved from `src/pages/chat/` to `src/pages/agent-chat/`, `?agent=<slug>`) |
 | `/studio/pipelines` | admin | list + `?id=` graph editor (`src/pages/studio/pipelines/`) |
 | `/studio/agents` | admin | list + `?id=` editor + Try-it panel |
 | `/studio/model-sets` | admin | list + `?id=` editor |
 | `/studio/skills`, `/studio/rules` | admin | lists + `?id=` editors |
-| `/settings` | admin | LLM providers (two-pane list/detail) |
+| `/settings/providers` | admin | LLM providers (two-pane list/detail); `/settings` redirects here |
 
-Shell layout (`src/pages/shell.tsx`): viewport frame + Sidebar — Workspace (Design chat),
-Configure (admin: Pipelines, Agents), "Used by agents" (admin: Models, Skills, Rules, Agent chat),
-Admin (Settings); footer = Avatar + name/email + role Badge + logout. Non-admins get hidden nav
-items and a Forbidden page on admin routes.
+Shell layout (`src/pages/shell.tsx`, 2026-11-02): viewport frame + **one** sidebar column (`w-60`),
+always exactly one level deep, two modes:
+- **Chats mode** (default, every non-settings route): header "Wonder Critique" + New-chat
+  IconButton (→ `/chat`); body = the design-chat thread list (`ThreadList` from
+  `pages/chat/rail.tsx`, click → `/chat?thread=<id>`); footer = a single "Settings" NavItem
+  (admin only, → `/studio/pipelines`) + user footer (Avatar, name/email, role Badge, logout).
+- **Settings mode** (admin and path `/studio/*` or `/settings*`): header "Settings", "Back to
+  chats", then a flat list: Pipelines, Agents, Models (`/studio/model-sets`), Providers
+  (`/settings/providers`), Skills, Rules.
+The thread list is shared via `ThreadsProvider`/`useThreads()` (`pages/chat/threads.tsx`,
+mounted by Shell, one `listRuns({limit:100})` query) — the chat page reads and reloads it.
+Non-admins never see Settings and get a Forbidden page on admin routes. There is deliberately
+**no standalone agent chat** (removed 2026-11-02): agents are only used through pipelines; the
+agent editor's Try-it panel is the only direct way to call one.
 
 Studio pages switch list↔editor via the `?id=` search param inside their `index.tsx`
 (no nested routes). Draft editing uses `useDirtyDraft` (debounced autosave `PUT …/draft`) +
@@ -98,10 +107,10 @@ vhost with SPA fallback (see `docs/deploy.ansible.md`). Production API is cross-
 - Studio/settings backends exist (2026-11-02); the studio pages can drop their "backend isn't
   available yet" callouts (`isBackendMissing`) once wired to the real API (the callouts now read
   "…can't be reached"). The runs engine exists (phase 6) — the design chat runs end to end.
-- Identity (name/slug/description) of studio defs is fixed at creation — no `PUT /{kind}/{id}`
-  endpoint by design; editors render identity read-only.
+- Identity: name/description of studio defs are editable via `components/IdentityCard` (agent and
+  model-set editors; `PATCH /studio/{kind}/{id}`); slug is immutable. Skills/rules/pipelines editors
+  have no identity card yet (2026-11-02).
 - Skill "run script in the sandbox" has no endpoint yet (`TODO` in `SkillsEditor.tsx`).
-- Agent-chat session titles are local-only (no title-update endpoint; first message truncates to 60 chars).
 - Design chat thread titles use `input.brief` of the first run (list items carry `input`; fallback: date).
 - Cross-run compare (`?compare=`) not implemented (iterations-compare is).
 - Deprecated-provider toggle in Settings skipped (models.dev marks models, not providers, deprecated).

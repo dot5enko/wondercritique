@@ -8,7 +8,7 @@ import { CircleX, Info, Plus, Trash2, TriangleAlert, X } from 'lucide-react'
 import { Card, IconButton, Input, Select, Textarea, Tooltip, type SelectOption } from '../../../ui'
 import { ConfirmDialog, Loadable, PageHeader, VersionBar } from '../../../components'
 import { useAsync, useDirtyDraft } from '../../../hooks'
-import { getCatalog, getDef, putDraft, type RuleBody, type RuleGroup, type RuleItem, type StudioDef } from '../../../api/studio'
+import { getCatalog, getEditableDef, putDraft, type RuleBody, type RuleGroup, type RuleItem, type StudioDef } from '../../../api/studio'
 import { emptyRuleBody } from './body'
 
 /** Sentinel option values inside the validator-code select. */
@@ -23,7 +23,7 @@ const SEVERITY_OPTIONS: SelectOption[] = [
 ]
 
 export default function RulesEditor({ id }: { id: string }) {
-  const def = useAsync((signal) => getDef<'rule'>('rule', id, signal), [id])
+  const def = useAsync((signal) => getEditableDef<'rule'>('rule', id, signal), [id])
   return (
     <Loadable
       loading={def.loading && !def.data}

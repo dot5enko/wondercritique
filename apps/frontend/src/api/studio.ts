@@ -8,7 +8,7 @@
  * Where the plan leaves the exact wire shape open the choice is documented
  * with an "ASSUMPTION" comment — adjust those when the backend lands.
  */
-import { apiGet, apiPost, apiPut, toQuery } from './client'
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQuery } from './client'
 import { mapAgentRunEvent, type AgentRunEvent } from './agents'
 import { postSSETyped } from './sse'
 
@@ -270,6 +270,19 @@ export function getDef<K extends StudioKind>(kind: K, id: string, signal?: Abort
   return apiGet<StudioDef<K>>(kindPath(kind, id), { signal })
 }
 
+/**
+ * Def for an editor: publishing clears the draft, so a published def with no
+ * draft gets its latest published body as the starting draft. The editor
+ * then shows what actually runs, not an empty template. Only an edit creates a
+ * server draft (the editors autosave only when dirty).
+ */
+export async function getEditableDef<K extends StudioKind>(kind: K, id: string, signal?: AbortSignal): Promise<StudioDef<K>> {
+  const def = await getDef(kind, id, signal)
+  if (def.draft != null || def.latest_version == null) return def
+  const ver = await getVersion(kind, id, def.latest_version, signal)
+  return { ...def, draft: ver.body }
+}
+
 /** ASSUMPTION: creation accepts identity + initial draft in one body. */
 export interface CreateDefBody<K extends StudioKind> {
   slug: string
@@ -280,6 +293,32 @@ export interface CreateDefBody<K extends StudioKind> {
 
 export function createDef<K extends StudioKind>(kind: K, body: CreateDefBody<K>, signal?: AbortSignal): Promise<StudioDef<K>> {
   return apiPost<StudioDef<K>>(kindPath(kind), body, { signal })
+}
+
+/** Edits name/description (the slug is immutable). Returns the refreshed def. */
+export function updateIdentity<K extends StudioKind>(
+  kind: K,
+  id: string,
+  body: { name: string; description: string },
+  signal?: AbortSignal,
+): Promise<StudioDef<K>> {
+  return apiPatch<StudioDef<K>>(kindPath(kind, id), body, { signal })
+}
+
+export interface PipelineRef {
+  id: string
+  slug: string
+  name: string
+}
+
+/** Agent def id → pipelines whose draft or latest published version uses it. */
+export function getAgentUsage(signal?: AbortSignal): Promise<{ usage: Record<string, PipelineRef[]> }> {
+  return apiGet<{ usage: Record<string, PipelineRef[]> }>('/studio/agents/usage', { signal })
+}
+
+/** Deletes an agent (409 while a pipeline still uses it). */
+export function deleteAgent(id: string, signal?: AbortSignal): Promise<void> {
+  return apiDelete<void>(kindPath('agent', id), { signal })
 }
 
 /** Autosaves the draft. ASSUMPTION: the backend answers with the refreshed def. */

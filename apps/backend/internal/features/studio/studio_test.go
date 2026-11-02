@@ -255,8 +255,17 @@ func TestValidationTables(t *testing.T) {
 	}
 	empty := okModelSet()
 	empty.Entries = nil
-	if w := post("model_set", "t2", empty); w.Code != http.StatusBadRequest {
-		t.Errorf("no entries = %d", w.Code)
+	// An empty set is a valid draft; publishing it is rejected.
+	w = post("model_set", "t2", empty)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("no entries draft = %d %s", w.Code, w.Body)
+	}
+	var emptyDef models.StudioDef
+	if err := json.Unmarshal(w.Body.Bytes(), &emptyDef); err != nil {
+		t.Fatal(err)
+	}
+	if w := h.do(http.MethodPost, "/studio/model_set/"+emptyDef.ID+"/publish", `{"note":""}`); w.Code != http.StatusBadRequest {
+		t.Errorf("publish with no entries = %d", w.Code)
 	}
 	neg := okModelSet()
 	neg.Entries[0].Params = &ModelParams{MaxOutputTokens: -1}

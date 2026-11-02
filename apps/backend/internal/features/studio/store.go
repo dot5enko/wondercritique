@@ -177,6 +177,27 @@ func (s *Store) Create(ctx context.Context, kind string, idn DefIdentity, draft 
 	return &def, nil
 }
 
+// UpdateIdentity changes the display name and description of a definition.
+// The slug stays immutable (referenced by chat mounts and bundles).
+func (s *Store) UpdateIdentity(ctx context.Context, kind, id, name, description string) (*models.StudioDef, error) {
+	var def models.StudioDef
+	err := dbx.Tx(ctx, s.db, func(ctx context.Context) error {
+		var err error
+		def, err = s.getLocked(ctx, kind, id)
+		if err != nil {
+			return err
+		}
+		def.Name, def.Description = name, description
+		return dbx.Conn(ctx, s.db).Model(&models.StudioDef{}).
+			Where("id = ?", def.ID).
+			Updates(map[string]any{"name": name, "description": description}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &def, nil
+}
+
 // PutDraft replaces the draft body of a definition and bumps draft_updated_at.
 func (s *Store) PutDraft(ctx context.Context, kind, id string, draft json.RawMessage) (*models.StudioDef, error) {
 	var def models.StudioDef

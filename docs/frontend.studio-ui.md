@@ -1,11 +1,18 @@
-# Frontend — Studio, Runs, Chat sections
+# Frontend — Studio, Runs, Design chat sections
 
 State as of 2026-11-02 (runs/chat now served by the real engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
 (see `docs/frontend.md` for stack/router/API-layer/auth). All data fetching goes through
 `src/api/*`; shared UI from `src/components/*`; forms bound via `useDirtyDraft` with
 debounced autosave to `PUT /studio/{kind}/{id}/draft` and `VersionBar` for publishing.
 
-## Settings — LLM providers (`/settings`, plan §3.3)
+**Editor loading (2026-11-02).** Publish clears the server draft, so every studio editor (pipelines,
+agents, model sets, skills, rules) loads via `api/studio.ts::getEditableDef`: when `draft == null`
+and a version exists, the latest published body becomes the starting draft. A clean editor never
+writes a draft (autosave fires only when dirty; pipeline Validate saves only when dirty — the
+backend validates draft-else-published). Before this, editors opened published defs as empty
+templates and any interaction saved that junk as the draft.
+
+## Providers — LLM providers (`/settings/providers`, plan §3.3)
 
 Two-pane: provider list (enabled-first, search, adapter Badge responses/chat/anthropic/none —
 `none` cannot be enabled, plan §3.2) + detail pane. Detail = Enable switch, API key
@@ -22,9 +29,12 @@ Segmented `single|fallback|fanout` with hints, capability filters ("Requires vis
 "Requires tool use" — ephemeral UI state, not saved), ordered entries with per-entry model
 Select (enabled catalog models, capability-filtered; excluded-but-selected entries stay with
 a warning Badge), reasoning-effort Select from the model's `reasoning_options`, max-output
-tokens. Identity (name/slug/description) is read-only — no update endpoint in the plan.
+tokens. Identity: name/description editable through the shared `IdentityCard` (explicit "Save identity" button → `PATCH /studio/{kind}/{id}`, independent of draft/publish); slug read-only.
 Editor re-syncs `useDirtyDraft` snapshot when the server draft converges (VersionBar saves
-externally). Fanout shows an info Callout.
+externally). Fanout shows an info Callout. Create modal (slug/name/description) posts an empty
+draft `{strategy: single, entries: []}` — the backend accepts empty drafts (2026-11-02) — then opens
+the editor; while `entries` is empty the editor passes `publishBlocked` to `VersionBar` (generic
+optional prop: disables Publish and shows the reason inline), mirroring the backend's publish rule.
 
 ## Agents (`/studio/agents`, plan §4.3–4.4)
 
@@ -43,9 +53,13 @@ Output contract · Limits.
   reasoning collapsed, tool rows collapsible, auto-scroll with scroll-lock, Stop via
   AbortController. **Draft is flushed before try/preview** (autosave debounce would otherwise
   hit the backend late).
-- List page: intro copy ("agents are the workers a pipeline calls…"), a "Chat" quick action per
-  published agent (→ `/agent-chat?agent=<slug>`), and a backend-unavailable Callout on
-  404/501/503/network.
+- List page **Used in** column (`getAgentUsage`: first pipeline name + `+N` badge, tooltip lists all;
+  "Unused" otherwise) and a trash IconButton per row (disabled with tooltip while used or usage still
+  loading). Delete opens the danger `ConfirmDialog`; a 409 from the backend (race) is shown inside the
+  dialog and usage reloads (2026-11-02).
+- List page: intro copy ("agents are the workers a pipeline calls…") and a backend-unavailable
+  Callout on 404/501/503/network. No per-agent chat action — standalone agent chat was removed
+  (2026-11-02); agents run only inside pipelines.
 
 ## Pipelines (`/studio/pipelines`, plan §4.5)
 
@@ -70,6 +84,7 @@ lives at reserved `config.label` (filtered out of generated SchemaForms).
   wire per non-`multiple` input, duplicate-wire rejection, **at most one loop edge** (Gate
   `continue` only, dashed+animated) and **DAG over non-loop edges** (client-side DFS check;
   full validation server-side via `POST /pipelines/{id}/validate`, issues rendered on nodes).
+  The list's "Nodes" column reads `draft?.nodes` → shows 0 for published defs without a draft.
 - Node config panel: SchemaForm from the node type's `config_schema`; Agent nodes add
   agent/version-pin/model-set-override (mapped into schema-declared property names when present);
   Input nodes get a form-fields editor (`{key,label,type}`) consumed by the run-start modal.
@@ -117,9 +132,11 @@ Every chat = pipeline runs (`src/pages/chat/`): the user describes what they wan
 a run starts (generator → render → critic → gate → regenerate while the score is low) → the
 thread streams each iteration live.
 
-- `index.tsx` — rail + timeline + composer. Threads are grouped client-side from
-  `listRuns({limit:100})` (`thread_id ?? id`); `?thread=<id>` deep links, `?run=<id>` opens the
-  details drawer. New chats pick a published pipeline (preselect: last choice in localStorage
+- `index.tsx` — timeline + composer only (no own rail column; the thread list lives in the Shell
+  sidebar). Header row only for an open thread (title + run count). Threads come from
+  `useThreads()` (`threads.tsx`, grouped client-side from `listRuns({limit:100})` by
+  `thread_id ?? id`); `?thread=<id>` deep links, `?run=<id>` opens the details drawer.
+  Switching thread clears a stale send error. New chats pick a published pipeline (preselect: last choice in localStorage
   `wc_chat_pipeline` → slug `default` → first; admin-only studio API → 403 hides the picker and
   the run starts on the default published pipeline). The message maps to the Input node's first
   non-image field (fallback `brief`); other required fields render as an inline form. Follow-up
@@ -127,8 +144,9 @@ thread streams each iteration live.
   Shift+Enter newline, Send↔Stop (`cancelRun` on the thread's last run), disabled while any run in
   the thread is non-terminal (statuses relay up from mounted RunCards). Empty state: explainer +
   3 clickable example prompts. 404/501/503/network → "runs backend can't be reached" Callout.
-- `rail.tsx` — thread summaries (`groupThreads`): title = first run's `input.brief` (fallback:
-  date), latest-run status dot, run count, relative time.
+- `rail.tsx` — `groupThreads` + `ThreadList` (rendered by the Shell sidebar): title = first run's
+  `input.brief` (fallback: date), latest-run status dot, run count, relative time.
+- `threads.tsx` — `ThreadsProvider`/`useThreads()` shared thread query (Shell ↔ chat page).
 - `RunCard.tsx` — one run as a chat turn: header (status, pipeline name/version, Stop, Details);
   per-iteration sections with a score badge, "Score N — critic requested changes" separator
   before iterations > 1, inline artifacts (HTML preview card, image shots grid, critique cards,
@@ -137,22 +155,6 @@ thread streams each iteration live.
   lost"); final banner shows the best artifact (iframe/image) with best iteration + score;
   failed/cancelled → Callout with Try-again (parent re-sends the previous message).
 - Drawer: `RunDetailView` in a fixed right-side panel (Esc/backdrop/X close), `?run=` param.
-- Smoke: `tmp/chat-smoke.mjs` (stubbed API, screenshots in `tmp/chat-smoke/`).
-
-## Agent chat (`/agent-chat`, plan §6)
-
-The former `/chat` page moved verbatim to `src/pages/agent-chat/`.
-`?agent=<slug>` (default `critic`); admin picker over `listDefs('agent')` published defs,
-falling back to a mono slug Input. Left session rail (new/delete/select) + thread + composer
-(Enter send / Shift+Enter newline, Send↔Stop). Messages span the full container width
-(`max-w-3xl` column): user messages stay a right-aligned accent-soft bubble that grows to
-100% when long; assistant text is a borderless full-width block rendered as markdown via
-shared `components/Markdown.tsx` (GFM tables/lists/strikethrough; user input and tool
-output stay plain text). `AgentRunEvent` mapping: `text_delta` appends per-segment (tool
-calls split segments so commentary→tool→answer order is preserved),
-`reasoning_delta` → collapsed "Thinking…" row, tool_call events → collapsible rows (history
-`tool_result` blocks folded in by `tool_call_id`), `run_failed` → Callout + Retry. Busy
-session (409) → warning Callout with cancel action. Stop = `cancelAgentRun` + abort
-(client disconnect also cancels server-side). Session titles are local-only (no update
-endpoint). Switching session/agent mid-stream aborts and discards the local partial.
-Reachable from the agents list ("Chat" action on published agents).
+- Smoke: `tmp/chat-smoke.mjs` (stubbed API, screenshots in `tmp/chat-smoke/`; also covers the
+  chats↔settings sidebar switch. Its only console errors are 404s for studio/settings endpoints
+  the stub doesn't serve).
