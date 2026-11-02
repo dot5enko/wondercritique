@@ -2,6 +2,7 @@
 # Public (non-secret) deployment variables.
 # Secrets live in group_vars/all/vault.yml which must NOT be committed.
 vault_jwt_secret: ""
+vault_secrets_key: ""
 vault_resend_api_key: ""
 vault_mail_from: ""
 vault_model_api_key: ""

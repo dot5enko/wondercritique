@@ -116,7 +116,9 @@ deploy/ansible/
   (false — keep it false)
 - vault (all `vault_`-prefixed; empty placeholders live in vars.yml, real
   values in vault.yml): `vault_jwt_secret` (>= 32 bytes, asserted in
-  pre_tasks), resend key, mail-from, model API key, and since 2026-10-31 both
+  pre_tasks), `vault_secrets_key` (>= 32 bytes, asserted in pre_tasks;
+  rendered into backend `SECRETS_KEY` — AES-GCM key for stored provider API
+  keys, prod refuses to start without it since 2026-11-02), resend key, mail-from, model API key, and since 2026-10-31 both
   vhost domains — `vault_backend_domain` (wonder-critique-api.cldfn.com),
   `vault_frontend_domain` (wonder-critique.cldfn.com); pre_tasks assert both
   non-empty so a missing vault entry fails fast instead of rendering

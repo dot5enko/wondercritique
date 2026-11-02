@@ -30,10 +30,11 @@
       ansible.builtin.assert:
         that:
           - vault_jwt_secret | length >= 32
+          - vault_secrets_key | length >= 32
         fail_msg: >-
-          JWT_SECRET must be at least 32 bytes in prod.
+          JWT_SECRET and SECRETS_KEY must each be at least 32 bytes in prod.
           Copy group_vars/all/vault.yml.example to vault.yml, fill the
-          values and encrypt with ansible-vault.
+          values (e.g. `openssl rand -base64 48`) and encrypt with ansible-vault.
       tags: [always]
 
     - name: Verify vhost domains are configured
