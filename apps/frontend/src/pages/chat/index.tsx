@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
-import { ArrowUp, MessageSquareDashed, PanelLeftOpen, Square, SquarePen, X } from 'lucide-react'
+import { ArrowUp, MessageCircle, MessageSquareDashed, Minus, PanelLeftOpen, Square, SquarePen, X } from 'lucide-react'
 import { Button, IconButton, Input, Select } from '../../ui'
 import { Badge, Callout, EmptyState, Skeleton } from '../../ui/Display'
 import { Field } from '../../ui/Form'
@@ -231,10 +231,31 @@ export default function ChatPage() {
 
   const drawerRunId = params.get('run')
 
-  // Chat column: 1150px max (fluid below), regardless of the sidebar state.
   const { sidebarCollapsed, toggleSidebar } = useShellLayout()
   const navigate = useNavigate()
-  const widthClass = 'max-w-[1150px]'
+
+  // Canvas = page body hosting the design stage (portaled in by RunCard).
+  const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null)
+  const [canvasRunId, setCanvasRunId] = useState<string | null>(null)
+  useEffect(() => setCanvasRunId(null), [threadId])
+  const shownRunId = canvasRunId && entries.some((e) => e.kind === 'run' && e.runId === canvasRunId) ? canvasRunId : lastRunId
+
+  // Floating chat panel (open/minimized, remembered).
+  const [chatOpen, setChatOpenState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('wc_chat_open') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const setChatOpen = useCallback((open: boolean) => {
+    setChatOpenState(open)
+    try {
+      localStorage.setItem('wc_chat_open', open ? '1' : '0')
+    } catch {
+      // ignore
+    }
+  }, [])
 
   /* ---------- render ---------- */
 
@@ -254,29 +275,25 @@ export default function ChatPage() {
         </div>
       ) : (
         <>
-          <div className="flex min-w-0 flex-1 flex-col">
-            {/* header — for an open thread, or always when the sidebar is collapsed
-                (it then hosts the expand + New chat controls) */}
-            {(activeThread || sidebarCollapsed) && (
-              <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5">
-                {sidebarCollapsed && (
-                  <div className="-ml-2 flex items-center gap-0.5 transition-[opacity,translate] delay-100 duration-200 ease-out starting:-translate-x-2 starting:opacity-0 motion-reduce:transition-none">
-                    <IconButton icon={<PanelLeftOpen />} label="Expand sidebar" size="sm" onClick={toggleSidebar} />
-                    <IconButton icon={<SquarePen />} label="New chat" size="sm" onClick={() => navigate('/chat')} />
-                  </div>
-                )}
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            {/* top bar only hosts the sidebar controls when the sidebar is collapsed */}
+            {sidebarCollapsed && (
+              <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2">
+                <div className="-ml-2 flex items-center gap-0.5">
+                  <IconButton icon={<PanelLeftOpen />} label="Expand sidebar" size="sm" onClick={toggleSidebar} />
+                  <IconButton icon={<SquarePen />} label="New chat" size="sm" onClick={() => navigate('/chat')} />
+                </div>
                 <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
                   {activeThread?.title ?? (threadId ? '' : 'New chat')}
                 </p>
-                {activeThread && activeThread.runs > 1 && <Badge tone="neutral">{activeThread.runs} runs</Badge>}
               </div>
             )}
 
-            {/* timeline */}
+            {/* canvas — the design is the page; run cards portal their stage in here */}
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className={`mx-auto flex w-full flex-col gap-4 px-4 py-5 ${widthClass}`}>
+              <div className="mx-auto w-full max-w-[1400px] px-4 pt-4 pb-24">
                 {!threadId && (
-                  <div className="rounded-xl border border-line bg-surface p-5">
+                  <div className="mx-auto max-w-2xl rounded-xl border border-line bg-surface p-5">
                     <EmptyState
                       icon={MessageSquareDashed}
                       title="Describe what you want designed"
@@ -288,7 +305,10 @@ export default function ChatPage() {
                         <button
                           key={ex}
                           type="button"
-                          onClick={() => setText(ex)}
+                          onClick={() => {
+                            setText(ex)
+                            setChatOpen(true)
+                          }}
                           className="cursor-pointer rounded-lg border border-line bg-app px-3 py-2 text-left text-sm text-ink-2 outline-none transition duration-100 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/30"
                         >
                           {ex}
@@ -297,131 +317,157 @@ export default function ChatPage() {
                     </div>
                   </div>
                 )}
-
-                {threadId && threadLoading && (
-                  <div className="space-y-3">
-                    <Skeleton className="h-16" />
-                    <Skeleton className="h-48" />
-                  </div>
-                )}
-                {threadId && !threadLoading && threadError != null && (
-                  threadError != null && isBackendMissing(threadError) ? (
-                    <Callout tone="warning" title="The runs backend can't be reached">
-                      This chat's history lives in the runs API, which isn't responding right now.
-                    </Callout>
-                  ) : (
-                    <ErrorState error={threadError} onRetry={() => threadId && void loadThread(threadId)} />
-                  )
-                )}
-
-                {entries.map((e, i) =>
-                  e.kind === 'user' ? (
-                    <div key={`${i}-user`} className="flex justify-end">
-                      <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-accent-soft px-3.5 py-2.5 text-sm whitespace-pre-wrap text-ink">
-                        {e.text}
-                        <span className="mt-0.5 block text-right text-2xs text-accent-ink/70">{relativeTime(e.at)}</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <RunCard
-                      key={`${i}-${e.runId}`}
-                      runId={e.runId}
-                      onStatus={reportStatus}
-                      onOpenDetails={() => setSearchParams((prev) => {
-                        const next = new URLSearchParams(prev)
-                        next.set('run', e.runId)
-                        return next
-                      })}
-                      onRetry={
-                        threadId
-                          ? () => {
-                              // the user message right before this run card
-                              const prev = entries[i - 1]
-                              void resend(prev && prev.kind === 'user' ? prev.text : '')
-                            }
-                          : undefined
-                      }
-                    />
-                  ),
-                )}
-
-                <div ref={bottomRef} />
+                {threadId && threadLoading && <Skeleton className="h-96" />}
+                <div ref={setCanvasEl} />
               </div>
             </div>
 
-            {/* composer */}
-            <div className="bg-surface">
-              <div className={`mx-auto flex w-full flex-col items-center gap-2 px-4 pt-2 pb-5 ${widthClass}`}>
-                {sendError != null && (
-                  isBackendMissing(sendError) ? (
-                    <Callout tone="warning" title="The runs backend can't be reached">
-                      Runs can't start while the runs API is unreachable.
-                    </Callout>
-                  ) : (
-                    <Callout tone="danger" title="Couldn't start the run">
-                      {sendError instanceof Error ? sendError.message : 'Something went wrong.'}
-                    </Callout>
-                  )
-                )}
-
-                {!threadId && !pipelinesUnavailable && pipelines.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xs whitespace-nowrap text-ink-3">Pipeline</span>
-                    <Select
-                      options={pipelines.map((p) => ({ value: p.id, label: p.name, hint: `v${p.latest_version}` }))}
-                      value={effectivePipelineId}
-                      onChange={setPipelineId}
-                      ariaLabel="Pipeline"
-                      className="max-w-64"
-                    />
-                  </div>
-                )}
-                {!threadId && pipelinesUnavailable && pipelines.length === 0 && (
-                  <p className="text-2xs text-ink-3">
-                    Pipeline picker unavailable (admin-only) — the default published pipeline will run.
+            {/* floating chat */}
+            {!chatOpen && (
+              <button
+                type="button"
+                aria-label="Open chat"
+                onClick={() => setChatOpen(true)}
+                className="absolute right-5 bottom-5 z-30 grid size-12 cursor-pointer place-items-center rounded-full bg-accent text-white shadow-lg outline-none transition hover:brightness-110 focus-visible:ring-4 focus-visible:ring-accent/30"
+              >
+                <MessageCircle size={20} />
+                {busy && <span className="absolute top-1 right-1 size-2.5 animate-pulse rounded-full bg-success ring-2 ring-white" />}
+              </button>
+            )}
+            {/* stays mounted when minimized so run streams/status keep flowing */}
+            {(
+              <div className={`absolute right-5 bottom-5 z-30 ${chatOpen ? 'flex' : 'hidden'} max-h-[min(640px,calc(100%-2.5rem))] w-[min(400px,calc(100%-2.5rem))] flex-col overflow-hidden rounded-2xl border border-line-strong bg-surface shadow-xl`}>
+                <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+                  <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+                    {activeThread?.title ?? 'New chat'}
                   </p>
-                )}
+                  <IconButton icon={<Minus />} label="Minimize chat" size="sm" onClick={() => setChatOpen(false)} />
+                </div>
 
-                {requiredExtras.length > 0 && (
-                  <div className="grid grid-cols-2 gap-2">
-                    {requiredExtras.map((f) => (
-                      <Field key={f.name} label={f.label || f.name} hint={f.description}>
-                        <Input
-                          value={extras[f.name] ?? f.default ?? ''}
-                          onChange={(e) => setExtras((prev) => ({ ...prev, [f.name]: e.target.value }))}
-                        />
-                      </Field>
-                    ))}
+                {entries.length > 0 || threadError != null ? (
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    <div className="flex flex-col gap-3 px-3 py-3">
+                      {threadId && !threadLoading && threadError != null && (
+                        isBackendMissing(threadError) ? (
+                          <Callout tone="warning" title="The runs backend can't be reached">
+                            This chat's history lives in the runs API, which isn't responding right now.
+                          </Callout>
+                        ) : (
+                          <ErrorState error={threadError} onRetry={() => threadId && void loadThread(threadId)} />
+                        )
+                      )}
+                      {entries.map((e, i) =>
+                        e.kind === 'user' ? (
+                          <div key={`${i}-user`} className="flex justify-end">
+                            <div className="max-w-[90%] rounded-2xl rounded-br-sm bg-accent-soft px-3 py-1.5 text-sm whitespace-pre-wrap text-ink">
+                              {e.text}
+                              <span className="mt-0.5 block text-right text-2xs text-accent-ink/70">{relativeTime(e.at)}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <RunCard
+                            key={`${i}-${e.runId}`}
+                            runId={e.runId}
+                            canvasEl={canvasEl}
+                            active={e.runId === shownRunId}
+                            onShow={() => setCanvasRunId(e.runId)}
+                            onStatus={reportStatus}
+                            onOpenDetails={() => setSearchParams((prev) => {
+                              const next = new URLSearchParams(prev)
+                              next.set('run', e.runId)
+                              return next
+                            })}
+                            onRetry={
+                              threadId
+                                ? () => {
+                                    const prev = entries[i - 1]
+                                    void resend(prev && prev.kind === 'user' ? prev.text : '')
+                                  }
+                                : undefined
+                            }
+                          />
+                        ),
+                      )}
+                      <div ref={bottomRef} />
+                    </div>
                   </div>
+                ) : (
+                  <p className="px-4 py-4 text-xs text-ink-3">Describe what you want designed — the result appears on the canvas.</p>
                 )}
 
-                <div className="flex h-12 w-full max-w-[720px] items-center gap-2 rounded-full border border-line-strong bg-surface py-1.5 pr-1.5 pl-5 shadow-lg ring-4 ring-accent/5 transition focus-within:border-accent focus-within:ring-accent/15">
-                  <input
-                    type="text"
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        void send()
-                      }
-                    }}
-                    placeholder={busy ? 'Waiting for the pipeline to finish…' : 'Describe what you want designed…'}
-                    disabled={busy || sending}
-                    className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed"
-                  />
-                  {busy ? (
-                    <Button variant="secondary" icon={<Square />} className="rounded-full" onClick={() => void stop()} disabled={!lastRunId}>
-                      Stop
-                    </Button>
-                  ) : (
-                    <Button variant="primary" icon={<ArrowUp />} className="rounded-full" loading={sending} disabled={!text.trim()} onClick={() => void send()}>
-                      Send
-                    </Button>
+                {/* composer */}
+                <div className="flex flex-col gap-2 border-t border-line p-3">
+                  {sendError != null && (
+                    isBackendMissing(sendError) ? (
+                      <Callout tone="warning" title="The runs backend can't be reached">
+                        Runs can't start while the runs API is unreachable.
+                      </Callout>
+                    ) : (
+                      <Callout tone="danger" title="Couldn't start the run">
+                        {sendError instanceof Error ? sendError.message : 'Something went wrong.'}
+                      </Callout>
+                    )
                   )}
+
+                  {!threadId && !pipelinesUnavailable && pipelines.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xs whitespace-nowrap text-ink-3">Pipeline</span>
+                      <Select
+                        options={pipelines.map((p) => ({ value: p.id, label: p.name, hint: `v${p.latest_version}` }))}
+                        value={effectivePipelineId}
+                        onChange={setPipelineId}
+                        ariaLabel="Pipeline"
+                        className="min-w-0 flex-1"
+                      />
+                    </div>
+                  )}
+                  {!threadId && pipelinesUnavailable && pipelines.length === 0 && (
+                    <p className="text-2xs text-ink-3">
+                      Pipeline picker unavailable (admin-only) — the default published pipeline will run.
+                    </p>
+                  )}
+
+                  {requiredExtras.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {requiredExtras.map((f) => (
+                        <Field key={f.name} label={f.label || f.name} hint={f.description}>
+                          <Input
+                            value={extras[f.name] ?? f.default ?? ''}
+                            onChange={(e) => setExtras((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                          />
+                        </Field>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex h-11 w-full items-center gap-2 rounded-full border border-line-strong bg-surface py-1 pr-1 pl-4 transition focus-within:border-accent focus-within:ring-4 focus-within:ring-accent/15">
+                    <input
+                      type="text"
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          void send()
+                        }
+                      }}
+                      placeholder={busy ? 'Waiting for the pipeline…' : 'Describe what you want designed…'}
+                      disabled={busy || sending}
+                      className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed"
+                    />
+                    {busy ? (
+                      <Button variant="secondary" icon={<Square />} className="rounded-full" onClick={() => void stop()} disabled={!lastRunId}>
+                        Stop
+                      </Button>
+                    ) : (
+                      <Button variant="primary" icon={<ArrowUp />} className="rounded-full" loading={sending} disabled={!text.trim()} onClick={() => void send()}>
+                        Send
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* run-details drawer */}

@@ -83,18 +83,18 @@ export function RunProgress({
   const failed = run.status === 'failed' || run.status === 'cancelled' || run.status === 'interrupted'
 
   return (
-    <div className="px-0.5 pb-1 pt-2">
-      <div className="flex items-baseline gap-x-4 gap-y-1">
+    <div className="px-0.5">
+      <div className="flex items-baseline gap-x-3 gap-y-1">
         <div
           className={cx(
-            'text-[34px] font-extralight leading-none tracking-tight tabular-nums',
+            'text-sm font-medium leading-none tabular-nums',
             running ? 'text-ink' : failed ? 'text-ink-3' : 'text-accent-ink',
           )}
         >
           {t.main}
-          <span className="ml-0.5 text-lg text-ink-3">.{t.tenth}</span>
+          <span className="text-2xs text-ink-3">.{t.tenth}</span>
         </div>
-        <div className="min-w-0 flex-1 truncate text-sm">
+        <div className="min-w-0 flex-1 truncate text-xs">
           {running ? (
             <span className="shimmer-text">
               {phrase ??
@@ -107,7 +107,7 @@ export function RunProgress({
       </div>
 
       {steps.length > 0 && (
-        <ol className="mt-3 flex gap-1">
+        <ol className="mt-1.5 flex gap-0.5">
           {steps.map((s) => {
             const a = ms(s.started_at)
             const b = stepEnd(s, now)
@@ -115,19 +115,18 @@ export function RunProgress({
             const live = s.status === 'running'
             const bad = s.status === 'failed' || s.status === 'cancelled' || s.status === 'interrupted'
             return (
-              <li key={s.id} className="min-w-0 flex-1 basis-0" style={{ flexGrow: Math.max(1, Math.min(4, (dur ?? 0) / 4000 + 1)) }}>
+              <li
+                key={s.id}
+                className="min-w-0 flex-1 basis-0"
+                style={{ flexGrow: Math.max(1, Math.min(4, (dur ?? 0) / 4000 + 1)) }}
+                title={`${nodeLabels.get(s.node_id) ?? s.node_id}${dur != null ? ` · ${short(dur)}` : ''}`}
+              >
                 <div
                   className={cx(
                     'h-[3px] rounded-full',
                     live ? 'shimmer-bar' : bad ? 'bg-danger/60' : 'bg-accent-muted',
                   )}
                 />
-                <div className="mt-1.5 flex items-baseline justify-between gap-1.5 text-2xs">
-                  <span className={cx('truncate', live ? 'text-ink-2' : 'text-ink-3')}>
-                    {nodeLabels.get(s.node_id) ?? s.node_id}
-                  </span>
-                  {dur != null && <span className="shrink-0 tabular-nums text-ink-3">{short(dur)}</span>}
-                </div>
               </li>
             )
           })}

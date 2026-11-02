@@ -368,7 +368,7 @@ export function DesignStage({
         </div>
 
         {/* the design */}
-        <div className="max-h-[640px] overflow-auto rounded-lg border border-line bg-app">
+        <div className="max-h-[calc(100vh-14rem)] min-h-[320px] overflow-auto rounded-lg border border-line bg-app">
           {shown ? (
             <Render key={shown.id} artifact={shown} />
           ) : (

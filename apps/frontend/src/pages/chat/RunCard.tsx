@@ -6,6 +6,7 @@
  * the same applyRunEvent reducer the run-detail page uses merges events.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Ban, ListTree, RotateCw } from 'lucide-react'
 import { Button, cx } from '../../ui'
 import { Callout, Skeleton } from '../../ui/Display'
@@ -30,9 +31,18 @@ export function RunCard({
   onOpenDetails,
   onRetry,
   onStatus,
+  canvasEl,
+  active,
+  onShow,
   className,
 }: {
   runId: string
+  /** Page canvas the design stage is portaled into. */
+  canvasEl: HTMLElement | null
+  /** This run's design is the one shown on the canvas. */
+  active: boolean
+  /** Show this run's design on the canvas. */
+  onShow?: () => void
   /** Opens the full run detail (drawer). */
   onOpenDetails: () => void
   /** Re-run after failure/cancel — the parent re-sends the same message. */
@@ -174,8 +184,31 @@ export function RunCard({
   const nodeOrder = new Map(bodyQ.data?.nodes.map((node, i) => [node.id, i]) ?? [])
   const bestIteration = bestIterationOf(run, iterations, scoreFor)
 
+  const stage =
+    active && canvasEl
+      ? createPortal(
+          <>
+            {iterations.length === 0 && running && <Skeleton className="h-56" />}
+            {iterations.length > 0 && (
+              <DesignStage
+                run={run}
+                iterations={iterations}
+                scoreFor={scoreFor}
+                nodeLabels={nodeLabels}
+                nodeTypes={nodeTypes}
+                nodeOrder={nodeOrder}
+                running={running}
+                bestIteration={bestIteration}
+              />
+            )}
+          </>,
+          canvasEl,
+        )
+      : null
+
   return (
-    <div className={cx('flex flex-col gap-2.5', className)}>
+    <div className={cx('flex flex-col gap-2', className)}>
+      {stage}
       {/* header */}
       <div className="flex items-center gap-2">
         <RunStatusBadge status={run.status} />
@@ -183,6 +216,11 @@ export function RunCard({
           {run.pipeline.name}
           {run.pipeline.version != null && ` · v${run.pipeline.version}`}
         </span>
+        {!active && onShow && (
+          <Button size="sm" variant="ghost" onClick={onShow}>
+            View
+          </Button>
+        )}
         {running && (
           <Button size="sm" variant="secondary" icon={<Ban />} loading={cancelling} onClick={() => void doCancel()}>
             Stop
@@ -217,8 +255,9 @@ export function RunCard({
         <Callout
           tone={run.status === 'interrupted' ? 'warning' : 'danger'}
           title={run.status === 'interrupted' ? 'Run interrupted' : run.status === 'cancelled' ? 'Run cancelled' : 'Run failed'}
+          className="!py-2"
         >
-          <div className="mt-1 flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <span className="min-w-0 break-words">{run.error}</span>
             {onRetry && run.status !== 'interrupted' && (
               <Button size="sm" variant="secondary" icon={<RotateCw />} className="shrink-0" onClick={onRetry}>
@@ -230,20 +269,6 @@ export function RunCard({
       )}
 
       <RunProgress run={run} nodeLabels={nodeLabels} nodeOrder={nodeOrder} activity={activity} />
-
-      {iterations.length === 0 && running && <Skeleton className="h-56" />}
-      {iterations.length > 0 && (
-        <DesignStage
-          run={run}
-          iterations={iterations}
-          scoreFor={scoreFor}
-          nodeLabels={nodeLabels}
-          nodeTypes={nodeTypes}
-          nodeOrder={nodeOrder}
-          running={running}
-          bestIteration={bestIteration}
-        />
-      )}
     </div>
   )
 }

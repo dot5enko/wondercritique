@@ -163,6 +163,17 @@ thread streams each iteration live.
   filmstrip of all iterations (thumb + score, best marked); critiques + step transcripts hidden
   behind one "Critiques & steps" toggle. Default selection: latest while running (follows new
   iterations until the user picks one), best iteration once finished.
+- **Canvas + floating chat (2026-11-02) — supersedes the timeline/composer layout described above.**
+  The page body is a canvas (`max-w-[1400px]`) that shows only the design: `RunCard` keeps its
+  header/Stop/Details/errors/`RunProgress` in the chat panel and **portals `DesignStage` into the canvas
+  element** (`canvasEl` state in `index.tsx`; `active` = the run shown, default last run, "View" button on
+  older runs). The chat (user bubbles, run status rows, pipeline picker, extras, composer) lives in a
+  floating bottom-right panel (400px, `absolute`, header with Minimize); minimized → round floating
+  button (pulse dot while busy). The panel stays mounted (`hidden`) when minimized so SSE/status keep
+  flowing; open state in localStorage `wc_chat_open`. Top bar renders only when the sidebar is collapsed.
+  No-thread canvas shows the explainer + example prompts (clicking one fills the composer and opens chat).
+  `RunProgress` is one slim row (small timer + activity phrase) over a 3px segmented bar (name · duration
+  in `title` tooltips). Stage render area `max-h-[calc(100vh-14rem)]`.
 - Drawer: `RunDetailView` in a fixed right-side panel (Esc/backdrop/X close), `?run=` param.
 - Smoke: `tmp/chat-smoke.mjs` (stubbed API, screenshots in `tmp/chat-smoke/`; also covers the
   chats↔settings sidebar switch. Its only console errors are 404s for studio/settings endpoints
