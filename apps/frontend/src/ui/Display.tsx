@@ -171,8 +171,8 @@ export function Tooltip({
 
 /* ---------- Card ---------- */
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cx('rounded-lg border border-line bg-surface', className)}>{children}</div>
+export function Card({ children, className, plain }: { children: ReactNode; className?: string; plain?: boolean }) {
+  return <div className={cx('rounded-lg bg-surface', !plain && 'border border-line', className)}>{children}</div>
 }
 
 export function CardHeader({
@@ -180,14 +180,23 @@ export function CardHeader({
   description,
   actions,
   className,
+  plain,
 }: {
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
   className?: string
+  /** No divider, tighter padding. */
+  plain?: boolean
 }) {
   return (
-    <div className={cx('flex items-start justify-between gap-3 border-b border-line px-4 py-3', className)}>
+    <div
+      className={cx(
+        'flex items-start justify-between gap-3',
+        plain ? 'px-3 pt-2.5 pb-1' : 'border-b border-line px-4 py-3',
+        className,
+      )}
+    >
       <div className="min-w-0">
         <p className="text-base font-semibold text-ink">{title}</p>
         {description && <p className="mt-0.5 text-xs text-ink-2">{description}</p>}
@@ -197,8 +206,8 @@ export function CardHeader({
   )
 }
 
-export function CardBody({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cx('p-4', className)}>{children}</div>
+export function CardBody({ children, className, plain }: { children: ReactNode; className?: string; plain?: boolean }) {
+  return <div className={cx(plain ? 'px-3 pt-1 pb-3' : 'p-4', className)}>{children}</div>
 }
 
 export function CardFooter({ children, className }: { children: ReactNode; className?: string }) {

@@ -37,7 +37,7 @@ pipeline editor onboarding). Base stack unchanged.
 | `/chat` | auth | **Design chat** — every chat is a pipeline run (`src/pages/chat/`, see `docs/frontend.studio-ui.md`) |
 | `/runs/:id` | auth | full run detail (`RunDetailView` from `src/pages/runs/detail.tsx`; also embedded in the chat drawer). `/runs` redirects to `/chat` — the run list was removed; history lives in the chat rail |
 | `/studio/pipelines` | admin | list + `?id=` graph editor (`src/pages/studio/pipelines/`) |
-| `/studio/agents` | admin | list + `?id=` editor + Try-it panel |
+| `/studio/agents` | admin | list + `?id=` editor + Try-it modal |
 | `/studio/model-sets` | admin | list + `?id=` editor |
 | `/studio/skills`, `/studio/rules` | admin | lists + `?id=` editors |
 | `/settings/providers` | admin | LLM providers (two-pane list/detail); `/settings` redirects here |
@@ -55,7 +55,7 @@ The thread list is shared via `ThreadsProvider`/`useThreads()` (`pages/chat/thre
 mounted by Shell, one `listRuns({limit:100})` query) — the chat page reads and reloads it.
 Non-admins never see Settings and get a Forbidden page on admin routes. There is deliberately
 **no standalone agent chat** (removed 2026-11-02): agents are only used through pipelines; the
-agent editor's Try-it panel is the only direct way to call one.
+agent editor's Try-it modal is the only direct way to call one.
 
 Studio pages switch list↔editor via the `?id=` search param inside their `index.tsx`
 (no nested routes). Draft editing uses `useDirtyDraft` (debounced autosave `PUT …/draft`) +

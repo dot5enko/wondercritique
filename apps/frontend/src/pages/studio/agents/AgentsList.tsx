@@ -1,6 +1,6 @@
 /**
  * Agents studio list (plan §4.4): searchable table of agent definitions —
- * name, slug, description, latest published version, last draft update.
+ * name, slug, used-in pipelines, latest published version, last draft update.
  */
 import { useState } from 'react'
 import { Bot, Trash2 } from 'lucide-react'
@@ -44,7 +44,7 @@ export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => vo
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-5">
+    <div className="w-full p-5">
       {defs.error != null && defs.data == null ? (
         isBackendMissing(defs.error) ? (
           <Callout tone="warning" title="The studio backend isn't available yet">
@@ -80,12 +80,6 @@ export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => vo
                 header: 'Slug',
                 width: 'w-44',
                 render: (d) => <span className="block truncate font-mono text-xs text-ink-2">{d.slug}</span>,
-              },
-              {
-                key: 'description',
-                header: 'Description',
-                width: 'w-72',
-                render: (d) => <span className="block truncate text-ink-2">{d.description || '—'}</span>,
               },
               {
                 key: 'used_in',

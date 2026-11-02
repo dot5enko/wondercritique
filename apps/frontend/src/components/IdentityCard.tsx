@@ -13,9 +13,11 @@ export interface IdentityCardProps {
   slugHint?: string
   /** Called after a successful save so the parent can reload the def. */
   onSaved: () => void
+  /** Borderless, compact variant. */
+  plain?: boolean
 }
 
-export function IdentityCard({ kind, def, slugHint, onSaved }: IdentityCardProps) {
+export function IdentityCard({ kind, def, slugHint, onSaved, plain }: IdentityCardProps) {
   const [name, setName] = useState(def.name)
   const [description, setDescription] = useState(def.description ?? '')
   const [saving, setSaving] = useState(false)
@@ -44,9 +46,9 @@ export function IdentityCard({ kind, def, slugHint, onSaved }: IdentityCardProps
   }
 
   return (
-    <Card>
-      <CardHeader title="Identity" description="Name and description apply immediately when saved — they aren't versioned, so there's nothing to publish. The slug is fixed at creation." />
-      <CardBody className="space-y-3">
+    <Card plain={plain}>
+      <CardHeader plain={plain} title="Identity" description="Name and description apply immediately when saved — they aren't versioned, so there's nothing to publish. The slug is fixed at creation." />
+      <CardBody plain={plain} className="space-y-3">
         <Field label="Name" error={name.trim() === '' ? 'Name is required' : undefined}>
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </Field>

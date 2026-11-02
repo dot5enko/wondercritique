@@ -38,9 +38,11 @@ optional prop: disables Publish and shows the reason inline), mirroring the back
 
 ## Agents (`/studio/agents`, plan §4.3–4.4)
 
-Two-column editor: form (2fr) + Try-it (1fr). The form is already grouped into titled cards in
+Single-column editor (generic "Agent" page header with a "Try it" button that opens a large modal, `TryItPanel.tsx`; run state survives closing the modal). The form is already grouped into titled cards in
 product order: Identity · Model set · Prompts (system + input template) · Tools · Skills & rules ·
 Output contract · Limits.
+Cards use the borderless compact variant (`plain` prop on `Card`/`CardHeader`/`CardBody`/`IdentityCard`:
+no borders/dividers, `px-3` padding, `space-y-2` between cards) — updated 2026-11-02.
 - Prompts are plain markdown Textareas (mono); the engine auto-appends `## Rules/## Skills/## Output`.
   Variable chips (`catalog.prompt_variables`, e.g. `{{brief}}`) insert at the caret of the
   last-focused textarea.
@@ -49,7 +51,7 @@ Output contract · Limits.
   (name/type/description/required/enum) that compiles to a JSON Schema `fields_schema`
   (`{type:'object',properties,required}`) and re-parses on restore.
 - "Show assembled prompt" → `POST /studio/agents/{id}/preview` modal (system + input panes).
-- Try-it: JSON sample input → `POST /studio/agents/{id}/try` (SSE) transcript — text deltas,
+- Try-it (modal): JSON sample input → `POST /studio/agents/{id}/try` (SSE) transcript — text deltas,
   reasoning collapsed, tool rows collapsible, auto-scroll with scroll-lock, Stop via
   AbortController. **Draft is flushed before try/preview** (autosave debounce would otherwise
   hit the backend late).
@@ -158,3 +160,5 @@ thread streams each iteration live.
 - Smoke: `tmp/chat-smoke.mjs` (stubbed API, screenshots in `tmp/chat-smoke/`; also covers the
   chats↔settings sidebar switch. Its only console errors are 404s for studio/settings endpoints
   the stub doesn't serve).
+
+**Layout width (2026-11-02).** `pages/shell.tsx` wraps the Outlet of all settings/studio pages in a `max-w-[1100px]` centered column; only the pipeline graph editor (`/studio/pipelines?id=`) is full-bleed. Pages must not set their own wider max-width. `Modal` sizes: sm/md/lg/xl (xl = `max-w-5xl`).

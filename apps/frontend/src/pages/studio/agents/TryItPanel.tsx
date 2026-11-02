@@ -1,5 +1,5 @@
 /**
- * "Try it" panel (plan §4.4): one-off run of the agent's current draft on a
+ * "Try it" modal (plan §4.4): one-off run of the agent's current draft on a
  * sample input, streaming the same run events as chat into a transcript.
  * Unsaved draft edits are flushed before the run so the backend sees the
  * draft the user is looking at; 409 (busy) / 429 (rate limited) are surfaced.
@@ -9,14 +9,12 @@ import { Play, Square } from 'lucide-react'
 import {
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
   Field,
   Spinner,
   StatusDot,
   Textarea,
 } from '../../../ui'
+import { Modal } from '../../../components'
 import { ApiError } from '../../../api/client'
 import { tryAgent, type StudioCatalog, type StudioDef } from '../../../api/studio'
 import type { TokenUsage } from '../../../api/types'
@@ -26,6 +24,8 @@ import { Transcript, applyEvent, type TranscriptEntry } from './Transcript'
 type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped'
 
 export interface TryItPanelProps {
+  open: boolean
+  onClose: () => void
   def: StudioDef<'agent'>
   catalog: StudioCatalog
   dirty: boolean
@@ -75,7 +75,7 @@ function StatusLine({ status, usage }: { status: RunStatus; usage: TokenUsage | 
   )
 }
 
-export function TryItPanel({ def, catalog, dirty, flushDraft }: TryItPanelProps) {
+export function TryItPanel({ open, onClose, def, catalog, dirty, flushDraft }: TryItPanelProps) {
   const [sampleText, setSampleText] = useState(() => JSON.stringify(defaultSampleInput(catalog), null, 2))
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
@@ -163,42 +163,46 @@ export function TryItPanel({ def, catalog, dirty, flushDraft }: TryItPanelProps)
   }, [entries])
 
   return (
-    <Card>
-      <CardHeader
-        title="Try it"
-        description="Runs the current draft on the sample input — unsaved changes are saved first."
-      />
-      <CardBody className="space-y-2.5">
-        <Field label="Sample input" hint="JSON object — one key per input port.">
-          <Textarea
-            mono
-            rows={5}
-            spellCheck={false}
-            value={sampleText}
-            onChange={(e) => setSampleText(e.target.value)}
-          />
-        </Field>
-        {jsonError && <p className="text-xs text-danger">{jsonError}</p>}
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="xl"
+      title="Try it"
+      description="Runs the current draft on the sample input — unsaved changes are saved first."
+    >
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+        <div className="space-y-2">
+          <Field label="Sample input" hint="JSON object — one key per input port.">
+            <Textarea
+              mono
+              rows={14}
+              spellCheck={false}
+              value={sampleText}
+              onChange={(e) => setSampleText(e.target.value)}
+            />
+          </Field>
+          {jsonError && <p className="text-xs text-danger">{jsonError}</p>}
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {running ? (
-            <Button size="sm" variant="danger" icon={<Square />} onClick={stop}>
-              Stop
-            </Button>
-          ) : (
-            <Button size="sm" variant="primary" icon={<Play />} onClick={() => void run()}>
-              Run
-            </Button>
-          )}
-          <StatusLine status={status} usage={usage} />
+          <div className="flex flex-wrap items-center gap-2.5">
+            {running ? (
+              <Button size="sm" variant="danger" icon={<Square />} onClick={stop}>
+                Stop
+              </Button>
+            ) : (
+              <Button size="sm" variant="primary" icon={<Play />} onClick={() => void run()}>
+                Run
+              </Button>
+            )}
+            <StatusLine status={status} usage={usage} />
+          </div>
+
+          {runError && <Callout tone="danger" title="Run failed">{runError}</Callout>}
         </div>
-
-        {runError && <Callout tone="danger" title="Run failed">{runError}</Callout>}
 
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="max-h-96 min-h-44 overflow-y-auto rounded-md border border-line bg-sunken p-2"
+          className="h-[60vh] min-h-64 overflow-y-auto rounded-md bg-sunken p-2"
         >
           {entries.length === 0 ? (
             <p className="grid place-items-center py-10 text-center text-xs text-ink-3">
@@ -208,7 +212,7 @@ export function TryItPanel({ def, catalog, dirty, flushDraft }: TryItPanelProps)
             <Transcript entries={entries} />
           )}
         </div>
-      </CardBody>
-    </Card>
+      </div>
+    </Modal>
   )
 }

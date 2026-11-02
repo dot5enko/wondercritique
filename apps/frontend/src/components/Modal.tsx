@@ -9,12 +9,13 @@ import { X } from 'lucide-react'
 import { cx } from '../ui/cx'
 import { IconButton } from '../ui/Button'
 
-export type ModalSize = 'sm' | 'md' | 'lg'
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl'
 
 const PANEL_SIZES: Record<ModalSize, string> = {
   sm: 'max-w-sm',
   md: 'max-w-lg',
   lg: 'max-w-2xl',
+  xl: 'max-w-5xl',
 }
 
 export interface ModalProps {

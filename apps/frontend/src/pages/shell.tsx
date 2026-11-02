@@ -52,7 +52,10 @@ function isSettingsPath(pathname: string): boolean {
 export default function Shell() {
   const { user } = useAuth()
   const { pathname } = useLocation()
+  const [params] = useSearchParams()
   const settingsMode = user?.role === 'admin' && isSettingsPath(pathname)
+  // Settings pages share a 1100px content column; the pipeline graph editor stays full-bleed.
+  const constrained = settingsMode && !(pathname.startsWith('/studio/pipelines') && params.get('id'))
 
   return (
     <ThreadsProvider>
@@ -62,7 +65,9 @@ export default function Shell() {
 
           <main className="flex min-w-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <Outlet />
+              <div className={constrained ? 'mx-auto h-full w-full max-w-[1100px]' : 'h-full'}>
+                <Outlet />
+              </div>
             </div>
           </main>
         </div>

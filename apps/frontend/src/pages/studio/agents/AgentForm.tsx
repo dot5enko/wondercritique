@@ -79,7 +79,7 @@ function PromptChips({ variables, onInsert }: { variables: PromptVariable[]; onI
           <button
             type="button"
             onClick={() => onInsert(v.name)}
-            className="cursor-pointer rounded border border-line bg-app px-1.5 py-0.5 font-mono text-2xs text-ink-2 outline-none transition-colors duration-100 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/40"
+            className="cursor-pointer rounded bg-app px-1.5 py-0.5 font-mono text-2xs text-ink-2 outline-none transition-colors duration-100 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             {`{{${v.name}}}`}
           </button>
@@ -101,7 +101,7 @@ function FieldRowEditor({
   onRemove: () => void
 }) {
   return (
-    <div className="rounded-md border border-line bg-app p-2">
+    <div className="rounded-md bg-app p-2">
       <div className="flex items-center gap-2">
         <Input
           placeholder="field_name"
@@ -228,13 +228,13 @@ function PreviewModal({
         <div className="space-y-3">
           <div>
             <p className="mb-1 text-2xs font-medium uppercase tracking-wide text-ink-3">System</p>
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-sunken p-2.5 font-mono text-2xs leading-relaxed text-ink">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-sunken p-2.5 font-mono text-2xs leading-relaxed text-ink">
               {preview.system}
             </pre>
           </div>
           <div>
             <p className="mb-1 text-2xs font-medium uppercase tracking-wide text-ink-3">Input</p>
-            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-sunken p-2.5 font-mono text-2xs leading-relaxed text-ink">
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-sunken p-2.5 font-mono text-2xs leading-relaxed text-ink">
               {preview.input}
             </pre>
           </div>
@@ -340,14 +340,14 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
   const selectedSet = catalog.model_sets.find((r) => r.id === draft.model_set_id)
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Identity */}
-      <IdentityCard kind="agent" def={def} slugHint="Used in API paths, e.g. /api/v1/agents/{slug}/runs." onSaved={onReloadDef} />
+      <IdentityCard plain kind="agent" def={def} slugHint="Used in API paths, e.g. /api/v1/agents/{slug}/runs." onSaved={onReloadDef} />
 
       {/* Model set */}
-      <Card>
-        <CardHeader title="Model set" description="Pool of models this agent runs on (see Model sets)." />
-        <CardBody className="space-y-1.5">
+      <Card plain>
+        <CardHeader plain title="Model set" description="Pool of models this agent runs on (see Model sets)." />
+        <CardBody plain className="space-y-1.5">
           <Select
             className="w-full max-w-sm"
             ariaLabel="Model set"
@@ -374,9 +374,9 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
       </Card>
 
       {/* Prompts */}
-      <Card>
-        <CardHeader title="Prompts" description="Plain markdown, assembled by the engine at run time." />
-        <CardBody className="space-y-2">
+      <Card plain>
+        <CardHeader plain title="Prompts" description="Plain markdown, assembled by the engine at run time." />
+        <CardBody plain className="space-y-2">
           <Field label="System prompt">
             <Textarea
               ref={systemRef}
@@ -400,7 +400,7 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
             automatically.
           </p>
 
-          <div className="border-t border-line pt-3">
+          <div className="pt-1">
             <Field label="Input template">
               <Textarea
                 ref={inputRef}
@@ -431,9 +431,9 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
       </Card>
 
       {/* Tools */}
-      <Card>
-        <CardHeader title="Tools" description="Allowlist of tools the agent may call — all-off is valid." />
-        <CardBody>
+      <Card plain>
+        <CardHeader plain title="Tools" description="Allowlist of tools the agent may call — all-off is valid." />
+        <CardBody plain>
           {catalog.tools.length === 0 ? (
             <p className="text-xs text-ink-3">No tools are registered in the catalog.</p>
           ) : (
@@ -460,9 +460,9 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
       </Card>
 
       {/* Skills & rules */}
-      <Card>
-        <CardHeader title="Skills & rules" description="Attached references the engine appends to the prompt." />
-        <CardBody>
+      <Card plain>
+        <CardHeader plain title="Skills & rules" description="Attached references the engine appends to the prompt." />
+        <CardBody plain>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="min-w-0">
               <p className="mb-1.5 text-xs font-medium text-ink-2">Skills</p>
@@ -511,9 +511,9 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
       </Card>
 
       {/* Output contract */}
-      <Card>
-        <CardHeader title="Output contract" description="What the agent must submit when it finishes." />
-        <CardBody className="space-y-3">
+      <Card plain>
+        <CardHeader plain title="Output contract" description="What the agent must submit when it finishes." />
+        <CardBody plain className="space-y-3">
           <Segmented
             options={[
               { value: 'artifact', label: 'Artifact' },
@@ -542,12 +542,12 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
                   Add field
                 </Button>
               </div>
-              <details className="group rounded-md border border-line bg-app">
+              <details className="group rounded-md bg-app">
                 <summary className={`${SUMMARY_CLASS} px-2.5 py-2 text-xs text-ink-2 transition-colors duration-100 hover:text-ink`}>
                   <ChevronRight size={12} className="shrink-0 transition-transform duration-150 group-open:rotate-90" />
                   Compiled JSON Schema
                 </summary>
-                <pre className="overflow-x-auto border-t border-line px-2.5 py-2 font-mono text-2xs leading-relaxed text-ink-2">
+                <pre className="overflow-x-auto px-2.5 py-2 font-mono text-2xs leading-relaxed text-ink-2">
                   {compiledJson}
                 </pre>
               </details>
@@ -557,9 +557,9 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
       </Card>
 
       {/* Limits */}
-      <Card>
-        <CardHeader title="Limits" description="Guardrails for the agent's run loop." />
-        <CardBody className="space-y-1.5">
+      <Card plain>
+        <CardHeader plain title="Limits" description="Guardrails for the agent's run loop." />
+        <CardBody plain className="space-y-1.5">
           <div className="flex flex-wrap gap-3">
             <Field label="Max steps" optional className="w-36">
               <Input
