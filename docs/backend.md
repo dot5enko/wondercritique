@@ -105,6 +105,7 @@ for client errors. Provider names must be unique; startup fails on a duplicate.
 | `JWT_ISSUER` | `iss` claim, default `wonder-critique`. |
 | `RESEND_API_KEY` | Sends email via Resend. If empty, dev logs emails (including codes) and prod refuses to start. |
 | `MAIL_FROM` | Sender, required when `RESEND_API_KEY` is set, e.g. `Wonder Critique <noreply@example.com>`. |
+| `ADMIN_EMAILS` | Comma list (since 2026-11-02). At startup each address is upserted as a role-`admin` user: missing users are created, existing ones promoted, soft-deleted ones skipped with a warning. Login still goes through the normal providers (identities link by email); a promoted user's new role reaches the access token on the next refresh or login. Runs inside a single tx as a `fx.Invoke` in `auth.Module` (after `dbx` migrations, which register first). |
 
 Tests can `fx.Decorate` `auth.Clock`, `mailer.Mailer` and `auth.RateLimit` (see `auth_test.go`).
 
