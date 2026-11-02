@@ -33,8 +33,14 @@ type Config struct {
 	// AdminEmails are upserted as admin users at startup (created if missing, promoted if present).
 	AdminEmails []string `env:"ADMIN_EMAILS" envSeparator:","`
 
+	// Legacy Meta key used by the pre-studio demo critic; kept as a key
+	// fallback for the `meta` provider (models.dev env name: META_MODEL_API_KEY).
 	ModelAPIKey string `env:"MODEL_API_KEY"`
 	AgentModel  string `env:"AGENT_MODEL" envDefault:"muse-spark-1.3-contributor"`
+
+	// SecretsKey encrypts stored provider API keys (AES-GCM). Required in prod
+	// (>= 32 bytes); in dev an empty value derives a stable key from JWT_SECRET.
+	SecretsKey string `env:"SECRETS_KEY"`
 
 	// Render (see docs/backend.render.md). Chrome is only started on the
 	// first render, so none of this is required to boot the app.

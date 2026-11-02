@@ -6,12 +6,14 @@ import (
 
 	"github.com/dot5enko/wondercritique/apps/backend/internal/config"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/crud"
-	"github.com/dot5enko/wondercritique/apps/backend/internal/features/agents"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/agentrun"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/auth"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/health"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/llm"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/messages"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/logger"
@@ -30,7 +32,9 @@ var Module = fx.Options(
 	auth.Module,
 	crud.Module,
 	messages.Module,
-	agents.Module,
+	llm.Module,
+	studio.Module,
+	agentrun.Module,
 	render.Module,
 	blobs.Module,
 )
