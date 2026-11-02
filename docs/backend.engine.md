@@ -146,3 +146,10 @@ OnEvent}) (*NodeResult, error)`:
   paging only; no retention/cleanup of runs, blobs or agent sessions.
 - Chrome must exist on the host for the render node (see `docs/backend.render.md`); without it a
   run fails at the Render step with a readable message.
+
+## Live activity (updated 2026-11-02)
+
+- SSE event `step_activity {iteration, node_id, label}` (deduplicated per step in `nodeRun.activity`).
+  Sources: agent run events via `agentrun.ToolActivity` (Thinking…, Writing a file, …), the
+  candidate tools/`GenerateCandidates`/`Judge` through `Sink.Activity` ("Generated 3/5 candidates",
+  "Rendering candidate 2/5", "Judge comparing 5 candidates"), and the render/pick_best nodes.

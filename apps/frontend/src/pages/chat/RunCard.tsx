@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Ban, ListTree, RotateCw } from 'lucide-react'
 import { Button, cx } from '../../ui'
 import { Callout, Skeleton } from '../../ui/Display'
-import { InlineSpinner } from '../../components/Errors'
+import { RunProgress } from './RunProgress'
 import { useAsync } from '../../hooks'
 import {
   cancelRun,
@@ -47,6 +47,8 @@ export function RunCard({
   const [streamError, setStreamError] = useState<unknown>(null)
   const [streamEpoch, setStreamEpoch] = useState(0)
   const [cancelling, setCancelling] = useState(false)
+  // node id → what that step is doing right now (live, from step_activity events)
+  const [activity, setActivity] = useState<Record<string, string>>({})
 
   const status = run?.status
   useEffect(() => {
@@ -65,6 +67,14 @@ export function RunCard({
     const onEvent = (ev: RunEvent): void => {
       if (ev.event === 'iteration_completed' && typeof ev.best_score === 'number') {
         setEventScores((prev) => ({ ...prev, [String(ev.iteration)]: ev.best_score as number }))
+      }
+      if (ev.event === 'step_activity') {
+        setActivity((prev) => ({ ...prev, [ev.node_id]: ev.label }))
+      } else if (ev.event === 'step_completed') {
+        setActivity((prev) => {
+          const { [ev.node_id]: _gone, ...rest } = prev
+          return rest
+        })
       }
       setData((prev) => (prev ? applyRunEvent(prev, ev) : prev))
       if (ev.event === 'iteration_completed' || ev.event === 'run_completed' || ev.event === 'run_failed') {
@@ -219,9 +229,9 @@ export function RunCard({
         </Callout>
       )}
 
-      {iterations.length === 0 && running && (
-        <InlineSpinner label="Waiting for the engine to schedule the first iteration…" />
-      )}
+      <RunProgress run={run} nodeLabels={nodeLabels} nodeOrder={nodeOrder} activity={activity} />
+
+      {iterations.length === 0 && running && <Skeleton className="h-56" />}
       {iterations.length > 0 && (
         <DesignStage
           run={run}

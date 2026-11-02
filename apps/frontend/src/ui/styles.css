@@ -121,3 +121,35 @@
     }
   }
 }
+
+/* Live-progress accents (RunProgress): a light sweep over text and bars. */
+@keyframes sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, var(--color-ink-3) 35%, var(--color-ink) 50%, var(--color-ink-3) 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: sweep 2.4s linear infinite;
+}
+
+.shimmer-bar {
+  background: linear-gradient(90deg, var(--color-accent-muted), var(--color-accent), var(--color-accent-muted));
+  background-size: 200% 100%;
+  animation: sweep 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text,
+  .shimmer-bar {
+    animation: none;
+  }
+}

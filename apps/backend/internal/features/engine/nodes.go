@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/agentrun"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/component"
@@ -33,6 +34,7 @@ type nodeRun struct {
 	inputs map[string][]*portVal
 
 	amu       sync.Mutex // artifacts are also recorded from agent tool calls (Sink)
+	lastLabel string     // last published activity label (guarded by amu)
 	artifacts []*models.Artifact
 }
 
@@ -46,6 +48,18 @@ type nodeResult struct {
 	model   string
 	session string
 	pinned  map[string]int
+}
+
+// activity publishes a live "what is this step doing now" label (deduplicated).
+func (nr *nodeRun) activity(label string) {
+	nr.amu.Lock()
+	same := nr.lastLabel == label
+	nr.lastLabel = label
+	nr.amu.Unlock()
+	if same || label == "" {
+		return
+	}
+	nr.st.emit("step_activity", map[string]any{"iteration": nr.it.n, "node_id": nr.node.ID, "label": label})
 }
 
 func (nr *nodeRun) artifactIDs() []string {
@@ -200,6 +214,7 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 	if count := int(numCfg(cfg, "count", 1)); count > 1 {
 		return nr.execAgentCandidates(ctx, req, count, sink)
 	}
+	req.OnEvent = func(ev agentkit.Event) { nr.activity(agentrun.ToolActivity(ev)) }
 	out, err := nr.st.e.Agents.RunNode(ctx, req)
 
 	res := &nodeResult{}
@@ -404,6 +419,8 @@ func (s *stepSink) SubRun(res *agentrun.NodeResult) {
 	}
 }
 
+func (s *stepSink) Activity(label string) { s.nr.activity(label) }
+
 func (s *stepSink) Event(kind string, payload any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -520,6 +537,7 @@ func (nr *nodeRun) execRender(ctx context.Context) (*nodeResult, error) {
 	if nr.st.e.Renderer == nil {
 		return nil, errors.New("screenshots are unavailable on this server")
 	}
+	nr.activity("Rendering screenshots")
 	rctx, cancel := context.WithTimeout(ctx, renderNodeTimeout)
 	defer cancel()
 	result, err := nr.st.e.Renderer.Render(rctx, render.Request{HTML: html, Variants: renderVariants(nr.node.Config)})
@@ -754,6 +772,7 @@ func (nr *nodeRun) execPickBest(ctx context.Context) (*nodeResult, error) {
 	entries := make([]agentrun.JudgeCandidate, len(items))
 	for i, c := range items {
 		entries[i] = agentrun.JudgeCandidate{HTML: c.html, Variation: c.variation}
+		nr.activity(fmt.Sprintf("Rendering candidate %d/%d", i+1, len(items)))
 		rctx, rcancel := context.WithTimeout(ctx, renderNodeTimeout)
 		shots, err := agentrun.RenderShots(rctx, nr.st.e.Renderer, c.html, variants, put)
 		rcancel()
@@ -768,6 +787,7 @@ func (nr *nodeRun) execPickBest(ctx context.Context) (*nodeResult, error) {
 		brief = briefOf(nr.st.input)
 	}
 	sink := &stepSink{nr: nr}
+	ctx = agentrun.WithSink(ctx, sink)
 	v, err := agentrun.Judge(ctx, nr.st.e.Agents.RunNode, agentrun.JudgeRequest{
 		Base: agentrun.NodeRequest{
 			AgentID: judgeID, Draft: nr.st.run.IsTest, Owner: nr.st.run.OwnerID,

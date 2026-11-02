@@ -616,4 +616,3 @@ func TestSeedDefaultsIdempotent(t *testing.T) {
 		t.Fatalf("seeded pipeline issues: %+v", issues)
 	}
 }
-

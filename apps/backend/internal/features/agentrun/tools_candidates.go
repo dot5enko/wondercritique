@@ -340,6 +340,7 @@ func (e toolEnv) pickBestTool() tool.Tool {
 					return "", err
 				}
 				entries[i] = JudgeCandidate{HTML: html}
+				activity(ctx, "Rendering candidate %d/%d", i+1, len(refs))
 				shots, rerr := RenderShots(ctx, e.r.renderer, html, []render.Variant{judgeVariant()}, e.putShot)
 				if rerr != nil {
 					entries[i].Note = rerr.Error()
@@ -445,7 +446,9 @@ func (e toolEnv) critiqueTool() tool.Tool {
 			}
 			samples["html"] = html
 			req := NodeRequest{AgentID: criticID, Draft: e.self.Draft, Owner: e.owner(ctx), Title: "critique_component", Worker: true, Samples: samples}
+			activity(ctx, "Rendering the component")
 			shots, rerr := RenderShots(ctx, e.r.renderer, html, []render.Variant{judgeVariant()}, e.putShot)
+			activity(ctx, "Critic reviewing the render")
 			if len(shots) > 0 {
 				samples["images"] = shots
 			}

@@ -139,3 +139,10 @@ message, zero console errors) ✓, `tmp/studio-smoke.cjs` (template create → 8
 stub `/api/v1` with Playwright routes against the vite dev server (`SMOKE_BASE` overrides the
 port — the dev server may land on 5174/5175 when 5173 is busy). Note: the real studio API paths
 are SINGULAR (`/studio/pipeline`, `/studio/agent`) — smoke stubs must match.
+
+## Chat run progress (updated 2026-11-02)
+
+- `pages/chat/RunProgress.tsx`: big elapsed timer (mm:ss.t, ticks 10×/s while running, frozen after
+  the run) + per-step timeline with durations + a slim live activity line from `step_activity`
+  events (RunCard keeps `activity` by node id). Replaces the chat-style "waiting" spinner; the stage
+  placeholder is a skeleton.

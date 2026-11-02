@@ -260,6 +260,7 @@ export type RunEvent =
       artifact_ids?: string[]
       error?: string
     }
+  | { event: 'step_activity'; run_id: string; iteration: number; node_id: string; label: string }
   | { event: 'iteration_started'; run_id: string; iteration: number }
   | {
       event: 'iteration_completed'
@@ -285,6 +286,7 @@ export function mapRunEvent(message: SSEMessage): RunEvent | null {
     if (typeof ev.event !== 'string') return null
     switch (ev.event) {
       case 'step_started':
+      case 'step_activity':
       case 'step_completed':
       case 'iteration_started':
       case 'iteration_completed':

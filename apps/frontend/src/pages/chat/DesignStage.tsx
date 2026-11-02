@@ -12,7 +12,6 @@ import { cx } from '../../ui'
 import { Badge, Skeleton } from '../../ui/Display'
 import { Segmented } from '../../ui/Form'
 import { Modal } from '../../components/Modal'
-import { InlineSpinner } from '../../components/Errors'
 import type { Artifact, Run } from '../../api/runs'
 import { GOOD_SCORE, formatScore } from '../runs/shared'
 import { ArtifactCritiqueCard, useArtifactContent } from '../runs/ArtifactViews'
@@ -374,7 +373,11 @@ export function DesignStage({
             <Render key={shown.id} artifact={shown} />
           ) : (
             <div className="grid h-72 place-items-center">
-              <InlineSpinner label={running ? 'Generating this iteration…' : 'No render for this iteration.'} />
+              {running ? (
+                <Skeleton className="h-full w-full rounded-none" />
+              ) : (
+                <span className="text-xs text-ink-3">No render for this iteration.</span>
+              )}
             </div>
           )}
         </div>

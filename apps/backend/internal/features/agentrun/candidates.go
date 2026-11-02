@@ -13,7 +13,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit"
 	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
@@ -40,6 +42,8 @@ type Sink interface {
 	SubRun(res *NodeResult)
 	// Event records a structured note for the step output (e.g. "explored").
 	Event(kind string, payload any)
+	// Activity publishes a short live label of what the step is doing now.
+	Activity(label string)
 }
 
 type sinkKey struct{}
@@ -48,6 +52,41 @@ type scopeKey struct{}
 // WithSink attaches a Sink to ctx (the engine does this per agent step).
 func WithSink(ctx context.Context, s Sink) context.Context {
 	return context.WithValue(ctx, sinkKey{}, s)
+}
+
+// activity reports a live label to the step's sink (no-op without one).
+func activity(ctx context.Context, format string, args ...any) {
+	if s := sinkFrom(ctx); s != nil {
+		s.Activity(fmt.Sprintf(format, args...))
+	}
+}
+
+// ToolActivity maps an agent run event to a live label ("" = no change).
+// The multi-candidate tools label themselves.
+func ToolActivity(ev agentkit.Event) string {
+	switch ev.Type {
+	case agentkit.EventRunStarted, agentkit.EventToolCallFinished:
+		return "Thinking…"
+	case agentkit.EventToolCallStarted:
+		if ev.ToolCall == nil {
+			return ""
+		}
+		switch ev.ToolCall.Name {
+		case "write_file":
+			return "Writing a file"
+		case "edit_file":
+			return "Editing a file"
+		case "read_file", "glob", "grep":
+			return "Reading the workspace"
+		case "run_js":
+			return "Running JavaScript"
+		case "validate_component":
+			return "Validating the component"
+		case "submit_artifact", "submit_critique", "submit_fields":
+			return "Submitting the result"
+		}
+	}
+	return ""
 }
 
 func sinkFrom(ctx context.Context) Sink {
@@ -106,6 +145,8 @@ func GenerateCandidates(ctx context.Context, run RunNodeFunc, req GenerateReques
 	out := make([]Candidate, n)
 	sem := make(chan struct{}, candidateConcurrency)
 	var wg sync.WaitGroup
+	var done atomic.Int32
+	activity(ctx, "Generating %d candidates in parallel", n)
 	for i := range n {
 		hint := ""
 		if i < len(req.Variations) {
@@ -136,6 +177,7 @@ func GenerateCandidates(ctx context.Context, run RunNodeFunc, req GenerateReques
 				r.Title = fmt.Sprintf("%s · candidate %d/%d", r.Title, i+1, n)
 			}
 			res, err := run(ctx, r)
+			activity(ctx, "Generated %d/%d candidates", done.Add(1), n)
 			out[i].Result = res
 			if err == nil && res != nil && res.HTML == "" {
 				err = errors.New("the generator returned no HTML (it needs the artifact output contract)")
@@ -266,6 +308,7 @@ func Judge(ctx context.Context, run RunNodeFunc, req JudgeRequest) (*Verdict, er
 	}
 	r.Extra = append(append([]llm.Block(nil), req.Base.Extra...), blocks...)
 
+	activity(ctx, "Judge comparing %d candidates", len(req.Candidates))
 	res, err := run(ctx, r)
 	if err != nil {
 		return &Verdict{Result: res}, err
