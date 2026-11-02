@@ -142,8 +142,10 @@ thread streams each iteration live.
   `wc_chat_pipeline` → slug `default` → first; admin-only studio API → 403 hides the picker and
   the run starts on the default published pipeline). The message maps to the Input node's first
   non-image field (fallback `brief`); other required fields render as an inline form. Follow-up
-  messages send `thread_id` (+ new input) as a new run in the same thread. Composer: Enter send /
-  Shift+Enter newline, Send↔Stop (`cancelRun` on the thread's last run), disabled while any run in
+  messages send `thread_id` (+ new input) as a new run in the same thread. Composer (2026-11-02): floating
+  one-line pill (`<input>`, not textarea; fixed `max-w-[720px]`, centered, rounded-full, shadow + accent
+  focus ring, no top border bar); chat column max width is a constant 1150px (sidebar collapsed or not).
+  Enter sends, Send↔Stop (`cancelRun` on the thread's last run), disabled while any run in
   the thread is non-terminal (statuses relay up from mounted RunCards). Empty state: explainer +
   3 clickable example prompts. 404/501/503/network → "runs backend can't be reached" Callout.
 - `rail.tsx` — `groupThreads` + `ThreadList` (rendered by the Shell sidebar): title = first run's

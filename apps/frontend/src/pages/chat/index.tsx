@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { ArrowUp, MessageSquareDashed, PanelLeftOpen, Square, SquarePen, X } from 'lucide-react'
-import { Button, IconButton, Input, Select, Textarea } from '../../ui'
+import { Button, IconButton, Input, Select } from '../../ui'
 import { Badge, Callout, EmptyState, Skeleton } from '../../ui/Display'
 import { Field } from '../../ui/Form'
 import { ErrorState, isBackendMissing, relativeTime } from '../../components'
@@ -231,12 +231,10 @@ export default function ChatPage() {
 
   const drawerRunId = params.get('run')
 
-  // Chat column: 1250px max (fluid below), 1400px when the Shell sidebar is collapsed.
+  // Chat column: 1150px max (fluid below), regardless of the sidebar state.
   const { sidebarCollapsed, toggleSidebar } = useShellLayout()
   const navigate = useNavigate()
-  const widthClass = `transition-[max-width] duration-200 ease-out motion-reduce:transition-none ${
-    sidebarCollapsed ? 'max-w-[1400px]' : 'max-w-[1250px]'
-  }`
+  const widthClass = 'max-w-[1150px]'
 
   /* ---------- render ---------- */
 
@@ -352,8 +350,8 @@ export default function ChatPage() {
             </div>
 
             {/* composer */}
-            <div className="border-t border-line bg-surface">
-              <div className={`mx-auto flex w-full flex-col gap-2 px-4 py-3 ${widthClass}`}>
+            <div className="bg-surface">
+              <div className={`mx-auto flex w-full flex-col items-center gap-2 px-4 pt-2 pb-5 ${widthClass}`}>
                 {sendError != null && (
                   isBackendMissing(sendError) ? (
                     <Callout tone="warning" title="The runs backend can't be reached">
@@ -397,9 +395,9 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                <div className="flex items-end gap-2">
-                  <Textarea
-                    rows={2}
+                <div className="flex h-12 w-full max-w-[720px] items-center gap-2 rounded-full border border-line-strong bg-surface py-1.5 pr-1.5 pl-5 shadow-lg ring-4 ring-accent/5 transition focus-within:border-accent focus-within:ring-accent/15">
+                  <input
+                    type="text"
                     value={text}
                     onChange={(e) => setText(e.target.value)}
                     onKeyDown={(e) => {
@@ -410,14 +408,14 @@ export default function ChatPage() {
                     }}
                     placeholder={busy ? 'Waiting for the pipeline to finish…' : 'Describe what you want designed…'}
                     disabled={busy || sending}
-                    className="min-h-0 flex-1 resize-none"
+                    className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed"
                   />
                   {busy ? (
-                    <Button variant="secondary" icon={<Square />} onClick={() => void stop()} disabled={!lastRunId}>
+                    <Button variant="secondary" icon={<Square />} className="rounded-full" onClick={() => void stop()} disabled={!lastRunId}>
                       Stop
                     </Button>
                   ) : (
-                    <Button variant="primary" icon={<ArrowUp />} loading={sending} disabled={!text.trim()} onClick={() => void send()}>
+                    <Button variant="primary" icon={<ArrowUp />} className="rounded-full" loading={sending} disabled={!text.trim()} onClick={() => void send()}>
                       Send
                     </Button>
                   )}
