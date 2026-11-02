@@ -226,6 +226,11 @@ Mounting gotcha (fixed 2026-11-02): `httpapi.New` returns a Go 1.22 `*http.Serve
 rewrites `req.URL.Path` to `chi.RouteContext(req.Context()).RoutePath` before serving. Note this also makes the root
 request logger print the rewritten path (the handler mutates the request in place before the logger reads it).
 
+## Pipeline engine and runs
+
+Package `internal/features/engine` (`engine.Module`) executes pipelines and serves `/api/v1/runs*` and
+`/api/v1/artifacts/{id}/content` — see `docs/backend.engine.md`. Config: `ENGINE_CONCURRENCY`.
+
 ## Studio backend
 
 Packages `internal/features/studio` (definition CRUD, catalog, validation, defaults),
@@ -278,7 +283,7 @@ dependency in its core. See `agentkit/README.md` for the embedding API.
 - `Hooks.BeforeToolCall` can veto (error → error tool result) or rewrite `call.Input`.
 - Present but wired since 2026-11-02 (studio agents): virtual FS + file tools
   (`docs/backend.vfs.md`), JS sandbox `run_js` (`docs/backend.sandbox.md`). The HTML render service
-  (`docs/backend.render.md`) is engine-side (phase 6), not an agent tool yet.
+  (`docs/backend.render.md`) is used by the engine's Render node (`docs/backend.engine.md`), not an agent tool.
 
 ### Agent HTTP endpoints (mounted at `/api/v1/agents/{slug}` for any published agent)
 

@@ -40,6 +40,25 @@ type CatalogModel struct {
 	MaxOutput        int
 	Deprecated       bool
 	Shape            string // per-model adapter override: responses | completions ("")
+	Cost             *ModelCost
+}
+
+// ModelCost is the models.dev price in USD per million tokens (nil = unknown).
+type ModelCost struct {
+	Input     float64
+	Output    float64
+	CacheRead float64
+}
+
+// Estimate returns the USD cost of the given token counts. inputTokens is the
+// uncached input; cachedTokens is billed at the cache-read price (the input
+// price when the catalog lists none).
+func (c ModelCost) Estimate(inputTokens, cachedTokens, outputTokens int) float64 {
+	cacheRate := c.CacheRead
+	if cacheRate == 0 {
+		cacheRate = c.Input
+	}
+	return (float64(inputTokens)*c.Input + float64(cachedTokens)*cacheRate + float64(outputTokens)*c.Output) / 1e6
 }
 
 // CatalogProvider is one provider of the parsed snapshot.
@@ -119,6 +138,11 @@ type rawModel struct {
 		Context int `json:"context"`
 		Output  int `json:"output"`
 	} `json:"limit"`
+	Cost *struct {
+		Input     float64 `json:"input"`
+		Output    float64 `json:"output"`
+		CacheRead float64 `json:"cache_read"`
+	} `json:"cost"`
 	ReasoningOptions []rawReasoningOption `json:"reasoning_options"`
 	Provider         *rawProviderRef      `json:"provider"`
 }
@@ -194,6 +218,9 @@ func buildProvider(id string, p rawProvider) *CatalogProvider {
 			MaxOutput:     m.Limit.Output,
 			Deprecated:    m.Status == "deprecated",
 			Shape:         shape,
+		}
+		if m.Cost != nil {
+			cm.Cost = &ModelCost{Input: m.Cost.Input, Output: m.Cost.Output, CacheRead: m.Cost.CacheRead}
 		}
 		for _, ro := range m.ReasoningOptions {
 			if ro.Type == "effort" && len(ro.Values) > 0 {

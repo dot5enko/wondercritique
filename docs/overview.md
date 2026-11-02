@@ -6,7 +6,7 @@ State as of 2026-10-31.
 
 ```
 apps/
-  backend/     Go API server (see docs/backend*.md)
+  backend/     Go API server (see docs/backend*.md; pipeline engine: docs/backend.engine.md)
   frontend/    Vite + TS + React SPA (see docs/frontend.md)
 deploy/ansible/  Ansible: backend + frontend + nginx roles (see docs/deploy.ansible.md)
 go.work        Go workspace: apps/backend + apps/backend/agentkit

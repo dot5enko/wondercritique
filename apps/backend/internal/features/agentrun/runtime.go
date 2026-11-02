@@ -39,9 +39,10 @@ type Runtime struct {
 	vfsStore *sqlite.Store
 	db       *sql.DB
 
-	mu       sync.Mutex
-	builds   map[string]*agentkit.Agent // "defID|version" -> built agent
-	material map[string]*agentMaterial  // agent name -> read-only VFS content
+	mu         sync.Mutex
+	builds     map[string]*agentkit.Agent // "defID|version" -> built agent
+	nodeBuilds map[string]*nodeBuild      // pipeline-node builds, see node.go
+	material   map[string]*agentMaterial  // agent name -> read-only VFS content
 
 	mountMu    sync.Mutex
 	mounts     map[string]vfs.FS
@@ -86,6 +87,7 @@ func NewRuntime(defs *studio.Store, svc *llmsvc.Service, agentStore store.Store,
 		log:        log,
 		vfsStore:   vfsStore,
 		builds:     map[string]*agentkit.Agent{},
+		nodeBuilds: map[string]*nodeBuild{},
 		material:   map[string]*agentMaterial{},
 		mounts:     map[string]vfs.FS{},
 		ephemeral:  map[string]string{},
@@ -224,14 +226,24 @@ func versionOf(def *models.StudioDef) int {
 // its VFS material under the agent name. sessStore is the store its sessions
 // live in (the shared sqlite store, or an ephemeral in-memory one for try runs).
 func (r *Runtime) buildAgent(ctx context.Context, res *resolvedBody, name string, sessStore store.Store) (*agentkit.Agent, error) {
+	agent, _, err := r.buildAgentInfo(ctx, res, name, sessStore)
+	return agent, err
+}
+
+// buildAgentInfo is buildAgent plus a description of the resolved model.
+func (r *Runtime) buildAgentInfo(ctx context.Context, res *resolvedBody, name string, sessStore store.Store) (*agentkit.Agent, *buildInfo, error) {
 	provider, entry, err := r.resolveModelSet(ctx, res.Body.ModelSetID, true)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	info := &buildInfo{providerID: entry.ProviderID, modelID: entry.ModelID}
+	if ms, err := r.store.Get(ctx, studio.KindModelSet, res.Body.ModelSetID); err == nil && ms.LatestVer != nil {
+		info.modelSetVersion = *ms.LatestVer
 	}
 
 	ruleGroups, skills, err := r.loadRefs(ctx, res.Body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	promptSkills := make([]PromptSkill, len(skills))
 	skillMounts := make([]skillMount, len(skills))
@@ -248,7 +260,7 @@ func (r *Runtime) buildAgent(ctx context.Context, res *resolvedBody, name string
 	system := AssembleSystem(res.Body.SystemPrompt, ruleGroups, promptSkills, res.Body.OutputContract)
 	tools, err := r.buildTools(res.Body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	maxSteps := res.Body.Limits.MaxSteps
@@ -270,7 +282,7 @@ func (r *Runtime) buildAgent(ctx context.Context, res *resolvedBody, name string
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Record the read-only VFS content under the agent name (sessions bind to names).
@@ -278,7 +290,7 @@ func (r *Runtime) buildAgent(ctx context.Context, res *resolvedBody, name string
 	r.materialMu.Lock()
 	r.material[name] = mat
 	r.materialMu.Unlock()
-	return agent, nil
+	return agent, info, nil
 }
 
 func entryParam(p *studio.ModelParams, get func(*studio.ModelParams) int) int {

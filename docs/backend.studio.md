@@ -99,6 +99,9 @@ published_by "system". Idempotent by emptiness.
   a model whose per-model shape resolves to a DIFFERENT adapter than its provider is dropped too
   (the provider builds one adapter for all its models). The snapshot's provider order is preserved
   (streaming JSON decode of the top-level object).
+- Prices: models.dev `cost` (USD per 1M tokens: input/output/cache_read) is kept per model
+  (`CatalogModel.Cost`); `Service.ModelCost(provider, model)` → `*ModelCost` (nil = unknown) with
+  `Estimate(input, cached, output)`; the engine uses it for run cost and gate budgets.
 - Base URL: provider `api` template with `${VAR}` placeholders filled from base_url_vars (missing
   var → unavailable); known defaults for first-party providers without `api` (openai/anthropic/meta).
 - Key resolution: stored key → models.dev `env` var → legacy `MODEL_API_KEY` (meta only). Keys are
@@ -157,5 +160,5 @@ published_by "system". Idempotent by emptiness.
 ## Frontend contract reconciliation
 
 `apps/frontend/src/api/{studio,settings,agents}.ts` match the implemented shapes (verified by
-`npm run typecheck`); runs.ts stays stubbed (engine = phase 6). Frontend "backend missing" callouts
+`npm run typecheck`); runs.ts is served by the engine (`docs/backend.engine.md`). Frontend "backend missing" callouts
 for studio/settings pages can now be pointed at the real API.

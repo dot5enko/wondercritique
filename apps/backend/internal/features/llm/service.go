@@ -175,6 +175,21 @@ func (s *Service) CatalogEntry(providerID string) (*CatalogProvider, bool) {
 	return p, ok
 }
 
+// ModelCost returns the models.dev price of providerID/modelID (nil when the
+// catalog does not list one).
+func (s *Service) ModelCost(providerID, modelID string) *ModelCost {
+	p, ok := s.CatalogEntry(providerID)
+	if !ok {
+		return nil
+	}
+	for i := range p.Models {
+		if p.Models[i].ID == modelID {
+			return p.Models[i].Cost
+		}
+	}
+	return nil
+}
+
 /* ---------- provider state ---------- */
 
 // stateRow returns the stored state row for a provider (nil when absent).

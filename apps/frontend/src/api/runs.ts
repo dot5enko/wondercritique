@@ -2,14 +2,15 @@
  * Runs API — pipeline executions and their artifacts (plan §5).
  * All paths relative to `/api/v1`.
  *
- * ASSUMPTIONS (kept at the module boundary so UI work can proceed; adjust
- * here only when the backend lands):
+ * Implemented by the backend engine (docs/backend.engine.md):
  * - run/step statuses follow the agentkit `RunStatus` vocabulary plus `pending`.
- * - list endpoints use the CRUD registry envelope `{items, next_cursor}`.
+ * - `GET /runs` answers `{items, next_cursor: null}` (offset paging, newest first).
+ * - critique scores run 0–10.
  */
 import { apiGet, apiPost, toQuery, API_ROOT, getSession, refreshSession, toApiError } from './client'
 import type { TokenUsage } from './types'
 import { getSSETyped, type SSEMessage } from './sse'
+import type { PipelineBody } from './studio'
 
 export type { TokenUsage } from './types'
 
@@ -30,23 +31,22 @@ export interface StartRunBody {
   /** Studio test run (may use drafts, not counted like production runs). */
   is_test?: boolean
   /**
-   * ASSUMPTION: follow-up message in the same chat — the engine attaches the
-   * thread's previous brief/final artifact/critique as context. The first run
-   * of a chat omits it; the backend echoes the thread id back on the run.
+   * Follow-up message in the same chat — the engine seeds the generator with
+   * the thread's previous brief and final HTML. The first run of a chat omits
+   * it; the backend sets the run's thread id to its own id.
    */
   thread_id?: string
   /**
-   * ASSUMPTION: which pipeline to run (its latest published version is pinned
-   * server-side). Omitted = the default published pipeline. The original plan
-   * contract only had `pipeline_version_id`, which the UI cannot know.
+   * Which pipeline to run (its latest published version is pinned
+   * server-side). Omitted = the published pipeline with slug `default`.
    */
   pipeline_id?: string
   input: Record<string, RunInputValue>
 }
 
-/** POST /runs → `{id}`. */
-export function startRun(body: StartRunBody, signal?: AbortSignal): Promise<{ id: string }> {
-  return apiPost<{ id: string }>('/runs', body, { signal })
+/** POST /runs → 201 `{id, thread_id, status}`; the run executes in the background. */
+export function startRun(body: StartRunBody, signal?: AbortSignal): Promise<{ id: string; thread_id?: string }> {
+  return apiPost<{ id: string; thread_id?: string }>('/runs', body, { signal })
 }
 
 /** Pipeline reference embedded in run list items. */
@@ -67,9 +67,9 @@ export interface RunListItem {
   usage: TokenUsage | null
   cost: number | null
   created_at: string
-  /** ASSUMPTION: present on follow-up runs of the same chat thread (see StartRunBody). */
+  /** Chat thread: the id of the thread's first run (every run has one). */
   thread_id?: string | null
-  /** ASSUMPTION: used to title chat threads by their first brief. */
+  /** Used to title chat threads by their first brief. */
   input?: Record<string, RunInputValue>
 }
 
@@ -77,7 +77,7 @@ export interface ListRunsParams {
   limit?: number
   offset?: number
   cursor?: string
-  /** ASSUMPTION: serialized as `filter[thread_id]=…` (CRUD registry convention). */
+  /** Serialized as `filter[thread_id]=…`. */
   filter?: { thread_id?: string }
 }
 
@@ -215,8 +215,10 @@ export interface Run {
   error: string | null
   created_at: string
   updated_at?: string
-  /** ASSUMPTION: set on follow-up runs of the same chat thread (see StartRunBody). */
+  /** Chat thread: the id of the thread's first run. */
   thread_id?: string | null
+  /** The pipeline body this run executed (pinned snapshot; present for every viewer). */
+  pipeline_body?: PipelineBody
   steps: RunStep[]
   artifacts: Artifact[]
 }
@@ -233,8 +235,10 @@ export function cancelRun(id: string, signal?: AbortSignal): Promise<void> {
 /* ---------- event stream (GET /runs/{id}/events, SSE) ---------- */
 
 /**
- * Engine events per plan §5, discriminated on the SSE `event` name. Payloads
- * are ASSUMPTIONS modelled on the runs/steps/artifacts shapes above.
+ * Engine events per plan §5, discriminated on the SSE `event` name (each
+ * payload repeats it under `event`). The stream replays the run's history on
+ * connect and closes after `run_completed` / `run_failed`. A cancelled run
+ * ends with `run_failed` (refetch the run for its `cancelled` status).
  */
 export type RunEvent =
   | { event: 'step_started'; run_id: string; iteration: number; node_id: string }

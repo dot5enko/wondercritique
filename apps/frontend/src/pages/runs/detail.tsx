@@ -26,7 +26,7 @@ import {
   type RunEvent,
   type RunStep,
 } from '../../api/runs'
-import { getDef, getVersion, type PipelineBody } from '../../api/studio'
+import { usePipelineBody } from './usePipelineBody'
 import { RunGraph, type RunNodeStepStatus } from './RunGraph'
 import { ScoreChart } from './ScoreChart'
 import { IterationPanel } from './IterationPanel'
@@ -183,20 +183,7 @@ export function RunDetailView({ runId: id }: { runId: string }) {
 
   /* ---------- pinned pipeline body (graph + labels) ---------- */
 
-  const pipelineId = run?.pipeline.id
-  const pipelineVersion = run?.pipeline.version
-  const bodyQ = useAsync(
-    async (signal): Promise<PipelineBody | null> => {
-      if (!pipelineId) return null
-      if (pipelineVersion != null) {
-        const ver = await getVersion('pipeline', pipelineId, pipelineVersion, signal).catch(() => null)
-        if (ver) return ver.body
-      }
-      const def = await getDef('pipeline', pipelineId, signal).catch(() => null)
-      return def?.draft ?? null
-    },
-    [pipelineId, pipelineVersion],
-  )
+  const bodyQ = usePipelineBody(run)
 
   const nodeLabels = useMemo(() => {
     const m = new Map<string, string>()

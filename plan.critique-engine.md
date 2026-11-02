@@ -269,4 +269,12 @@ per-provider rate limits.
   generic chat mount `/agents/{slug}`). Full pass: backend + agentkit build/vet/test green
   (render tests fail in this environment — pre-existing), `fx.ValidateApp` green, frontend
   typecheck green. Details: `docs/backend.studio.md`, status/notes: `docs/backend.plan.md`.
-  Phase 6 (engine/runs) not started.
+- 2026-11-02: phase 6 — pipeline engine (`internal/features/engine`, `docs/backend.engine.md`): runs/
+  run_steps/artifacts, level-parallel graph scheduler with the gate loop edge (feedback carries the
+  critique + previous HTML), node executors (input, agent via `agentrun.RunNode`, validate, render,
+  merge, gate, output), best-iteration selection, thread follow-ups, cancel, crash recovery
+  (`interrupted`), `POST/GET /runs`, `/runs/{id}/events` SSE with history replay,
+  `/artifacts/{id}/content`; models.dev prices feed run cost/budget. Frontend wired to the real
+  shapes (scores 0–10, run-carried pipeline snapshot). Engine + agentrun tests green with `-race`.
+  The design chat goes prompt → result in the UI; a live model + Chrome on the host are required
+  and were not exercised here.

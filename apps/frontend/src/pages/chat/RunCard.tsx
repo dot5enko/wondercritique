@@ -21,29 +21,11 @@ import {
   type RunEvent,
   type RunStatus,
 } from '../../api/runs'
-import { getDef, getVersion, type PipelineBody } from '../../api/studio'
-import { RunStatusBadge, formatScore, nodeLabel } from '../runs/shared'
+import { usePipelineBody } from '../runs/usePipelineBody'
+import { GOOD_SCORE, RunStatusBadge, formatScore, nodeLabel } from '../runs/shared'
 import { HtmlArtifactCard, ArtifactCritiqueCard, ShotsGrid, useArtifactContent } from '../runs/ArtifactViews'
 import { StepsAccordion } from '../runs/StepsAccordion'
 import { applyRunEvent } from '../runs/detail'
-
-/** Loads the pinned pipeline body for labels/types (version body → draft fallback). */
-function usePipelineBody(run: Run | null) {
-  const pipelineId = run?.pipeline.id
-  const version = run?.pipeline.version
-  return useAsync(
-    async (signal): Promise<PipelineBody | null> => {
-      if (!pipelineId) return null
-      if (version != null) {
-        const ver = await getVersion('pipeline', pipelineId, version, signal).catch(() => null)
-        if (ver) return ver.body
-      }
-      const def = await getDef('pipeline', pipelineId, signal).catch(() => null)
-      return def?.draft ?? null
-    },
-    [pipelineId, version],
-  )
-}
 
 /** Final-design preview: the best artifact rendered large (html or image). */
 function BestArtifact({ artifact }: { artifact: Artifact }) {
@@ -133,7 +115,7 @@ export function RunCard({
     }
   }, [runId, status, streamEpoch, reload, setData])
 
-  const bodyQ = usePipelineBody(run ?? null)
+  const bodyQ = usePipelineBody(run)
 
   // Status relay for the chat page (composer busy state).
   useEffect(() => {
@@ -288,7 +270,7 @@ export function RunCard({
               )}
               <div className="flex items-center gap-2">
                 <p className="text-2xs font-semibold tracking-wide text-ink-3 uppercase">Iteration {n}</p>
-                {score != null && <Badge tone={score >= 80 ? 'success' : 'neutral'}>score {formatScore(score)}</Badge>}
+                {score != null && <Badge tone={score >= GOOD_SCORE ? 'success' : 'neutral'}>score {formatScore(score)}</Badge>}
                 {anyRunning && <Badge tone="accent">running</Badge>}
               </div>
 

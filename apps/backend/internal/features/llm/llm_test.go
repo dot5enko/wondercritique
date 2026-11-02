@@ -409,3 +409,28 @@ func TestCatalogFetchSendsEtag(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
+
+func TestCatalogParsesModelCost(t *testing.T) {
+	provs, err := parseCatalog([]byte(`{"acme":{"id":"acme","name":"Acme","npm":"@ai-sdk/openai-compatible","api":"https://x/v1","models":{
+		"priced":{"id":"priced","name":"Priced","tool_call":true,"cost":{"input":2,"output":10,"cache_read":0.5}},
+		"nocache":{"id":"nocache","name":"No cache","cost":{"input":1,"output":4}},
+		"free":{"id":"free","name":"Free"}}}}`))
+	if err != nil || len(provs) != 1 {
+		t.Fatalf("parse: %v (%d providers)", err, len(provs))
+	}
+	byID := map[string]CatalogModel{}
+	for _, m := range provs[0].Models {
+		byID[m.ID] = m
+	}
+	if byID["free"].Cost != nil {
+		t.Errorf("unpriced model has cost %+v", byID["free"].Cost)
+	}
+	// 1M uncached input ($2) + 1M cached ($0.5) + 100k output ($1) = $3.5
+	if got := byID["priced"].Cost.Estimate(1_000_000, 1_000_000, 100_000); got != 3.5 {
+		t.Errorf("priced estimate = %v", got)
+	}
+	// Without a cache price, cached tokens bill at the input price.
+	if got := byID["nocache"].Cost.Estimate(0, 1_000_000, 0); got != 1 {
+		t.Errorf("no-cache estimate = %v", got)
+	}
+}

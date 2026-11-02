@@ -125,6 +125,42 @@ func isImageValue(v string) bool {
 	return strings.HasPrefix(v, "data:image/") || strings.HasPrefix(v, "wcblob://")
 }
 
+// imageValues returns the image references held by a sample value: a single
+// image string, or a non-empty list ([]string / []any) made only of images.
+// nil means the value is not an image (it renders as text).
+func imageValues(v any) []string {
+	switch x := v.(type) {
+	case string:
+		if isImageValue(x) {
+			return []string{x}
+		}
+	case []string:
+		if len(x) == 0 {
+			return nil
+		}
+		for _, s := range x {
+			if !isImageValue(s) {
+				return nil
+			}
+		}
+		return x
+	case []any:
+		if len(x) == 0 {
+			return nil
+		}
+		out := make([]string, 0, len(x))
+		for _, e := range x {
+			s, ok := e.(string)
+			if !ok || !isImageValue(s) {
+				return nil
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	return nil
+}
+
 // BuildInput builds the user input message from the input template and the
 // sample map. {{name}} placeholders substitute the matching sample value
 // (missing known variables render as ""; unknown placeholders stay verbatim);
@@ -161,11 +197,11 @@ func BuildInput(template string, samples map[string]any, preview bool) llm.Messa
 				}
 				return m // unknown placeholder stays verbatim
 			}
-			if s, isStr := v.(string); isStr && isImageValue(s) {
+			if imgs := imageValues(v); imgs != nil {
 				if preview {
 					return "[image: " + name + "]"
 				}
-				return "" // the image becomes a block after the text
+				return "" // the images become blocks after the text
 			}
 			return render(v)
 		})
@@ -178,7 +214,7 @@ func BuildInput(template string, samples map[string]any, preview bool) llm.Messa
 		var sb strings.Builder
 		for _, k := range keys {
 			v := samples[k]
-			if s, isStr := v.(string); isStr && isImageValue(s) {
+			if imageValues(v) != nil {
 				if preview {
 					fmt.Fprintf(&sb, "## %s\n\n[image: %s]\n\n", k, k)
 				}
@@ -201,8 +237,8 @@ func BuildInput(template string, samples map[string]any, preview bool) llm.Messa
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			if s, isStr := samples[k].(string); isStr && isImageValue(s) {
-				blocks = append(blocks, llm.ImageBlock(s))
+			for _, img := range imageValues(samples[k]) {
+				blocks = append(blocks, llm.ImageBlock(img))
 			}
 		}
 	}

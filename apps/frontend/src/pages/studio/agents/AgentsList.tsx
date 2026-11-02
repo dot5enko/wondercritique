@@ -23,7 +23,7 @@ export function AgentsList({ onOpen }: { onOpen: (def: StudioDef<'agent'>) => vo
         isBackendMissing(defs.error) ? (
           <Callout tone="warning" title="The studio backend isn't available yet">
             <p className="mt-1 text-sm">
-              Agents can't be loaded or saved yet — the studio API hasn't been built.
+              Agents can't be loaded or saved right now — the studio API isn't responding.
             </p>
             {defs.error instanceof Error && <p className="mt-1 font-mono text-2xs text-ink-3">{defs.error.message}</p>}
           </Callout>

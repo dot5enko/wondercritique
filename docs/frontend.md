@@ -66,8 +66,12 @@ is the backend reference. Reconciled and verified by `npm run typecheck`:
   (`synced_at`, `model_count`, `has_key` only, `rpm_limit: null` = unlimited).
 - `agents.ts` — the generic chat mount `/agents/{slug}/…` serves every published agent
   (agentkit httpapi surface, unchanged).
-- `runs.ts` — **still stubbed** (engine = phase 6): `/runs*` endpoints do not exist yet; the
-  `thread_id`/pipeline fields remain ASSUMPTIONs until then.
+- `runs.ts` — **implemented by the engine (2026-11-02, plan phase 6; `docs/backend.engine.md`)**:
+  `POST /runs` → 201 `{id, thread_id, status}`, `GET /runs` (offset paging, `filter[thread_id]`),
+  `GET /runs/{id}` (+ `pipeline_body` snapshot), `/runs/{id}/events` SSE (history replay, closes
+  after the terminal event), `/runs/{id}/cancel`, `/artifacts/{id}/content`. Critique scores run
+  0–10. Typecheck passes against these shapes; the chat has not been exercised against a live model
+  in this environment (backend flow is covered by engine tests with fake agents/renderer).
 
 ## Commands
 
@@ -92,13 +96,13 @@ vhost with SPA fallback (see `docs/deploy.ansible.md`). Production API is cross-
 ## Known gaps / TODO
 
 - Studio/settings backends exist (2026-11-02); the studio pages can drop their "backend isn't
-  available yet" callouts (`isBackendMissing`) once wired to the real API. The design chat still
-  needs the runs engine (phase 6).
+  available yet" callouts (`isBackendMissing`) once wired to the real API (the callouts now read
+  "…can't be reached"). The runs engine exists (phase 6) — the design chat runs end to end.
 - Identity (name/slug/description) of studio defs is fixed at creation — no `PUT /{kind}/{id}`
   endpoint by design; editors render identity read-only.
 - Skill "run script in the sandbox" has no endpoint yet (`TODO` in `SkillsEditor.tsx`).
 - Agent-chat session titles are local-only (no title-update endpoint; first message truncates to 60 chars).
-- Design chat thread titles depend on the ASSUMPTION `input.brief` on run list items (fallback: date) — runs API pending.
+- Design chat thread titles use `input.brief` of the first run (list items carry `input`; fallback: date).
 - Cross-run compare (`?compare=`) not implemented (iterations-compare is).
 - Deprecated-provider toggle in Settings skipped (models.dev marks models, not providers, deprecated).
 - `docs/llm.models-catalog.md` is the catalog format reference for the Settings page (now parsed

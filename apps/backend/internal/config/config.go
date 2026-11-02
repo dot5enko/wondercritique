@@ -42,6 +42,10 @@ type Config struct {
 	// (>= 32 bytes); in dev an empty value derives a stable key from JWT_SECRET.
 	SecretsKey string `env:"SECRETS_KEY"`
 
+	// EngineConcurrency caps pipeline runs executing at once; the rest wait as
+	// `pending` (see docs/backend.engine.md).
+	EngineConcurrency int `env:"ENGINE_CONCURRENCY" envDefault:"4"`
+
 	// Render (see docs/backend.render.md). Chrome is only started on the
 	// first render, so none of this is required to boot the app.
 	RenderChromePath      string        `env:"RENDER_CHROME_PATH"` // empty → auto-detect

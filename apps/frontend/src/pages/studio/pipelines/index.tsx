@@ -98,10 +98,10 @@ function PipelinesList({ onOpen }: { onOpen: (def: StudioDef<'pipeline'>) => voi
     if (isBackendMissing(list.error)) {
       return (
         <div className="p-5">
-          <Callout tone="warning" title="The studio backend isn't available yet">
+          <Callout tone="warning" title="The studio backend can't be reached">
             <p className="mt-1 text-sm">
-              Pipelines can't be loaded or saved yet — the studio API hasn't been built. The chat
-              will use them as soon as it lands.
+              Pipelines can't be loaded or saved right now — the studio API isn't responding. Check
+              that the server is running and reload.
             </p>
             {list.error instanceof Error && <p className="mt-1 font-mono text-2xs text-ink-3">{list.error.message}</p>}
           </Callout>
@@ -229,8 +229,8 @@ function PipelineEditorPage({ id, onBack }: { id: string; onBack: () => void }) 
     if (isBackendMissing(load.error)) {
       return (
         <div className="grid h-full place-items-center p-6">
-          <Callout tone="warning" title="The studio backend isn't available yet" className="max-w-lg">
-            <p className="mt-1 text-sm">Pipelines can't be loaded or saved yet — the studio API hasn't been built.</p>
+          <Callout tone="warning" title="The studio backend can't be reached" className="max-w-lg">
+            <p className="mt-1 text-sm">Pipelines can't be loaded or saved right now — the studio API isn't responding.</p>
             {load.error instanceof Error && <p className="mt-1 font-mono text-2xs text-ink-3">{load.error.message}</p>}
           </Callout>
         </div>

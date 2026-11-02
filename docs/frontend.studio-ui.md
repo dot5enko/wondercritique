@@ -1,6 +1,6 @@
 # Frontend — Studio, Runs, Chat sections
 
-State as of 2026-11-02. Feature-level reference for the pages built on the base app
+State as of 2026-11-02 (runs/chat now served by the real engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
 (see `docs/frontend.md` for stack/router/API-layer/auth). All data fetching goes through
 `src/api/*`; shared UI from `src/components/*`; forms bound via `useDirtyDraft` with
 debounced autosave to `PUT /studio/{kind}/{id}/draft` and `VersionBar` for publishing.
@@ -76,7 +76,7 @@ lives at reserved `config.label` (filtered out of generated SchemaForms).
 - Edge ids are deterministic `from:port->to:port`; positions persist via `onNodeDragStop`;
   untrusted bodies pass through `sanitizeBody` before conversion.
 - Canvas themed via `--xy-*` CSS vars → design tokens (no raw hex).
-- Backend-unavailable (404/501/503/network) → "studio backend isn't available yet" Callout on
+- Backend-unreachable (404/501/503/network) → "studio backend can't be reached" Callout on
   the list page and the editor instead of a generic error.
 
 ## Skills & Rules (`/studio/skills`, `/studio/rules`, plan §4.6)
@@ -105,6 +105,11 @@ redirects to `/chat`. What remains under `src/pages/runs/`:
   (`RunStatusBadge`, `nodeLabel`, formatters, critique heuristics).
 - `RunGraph` defensively defaults missing node `position` to `{x:0,y:0}` (a body without
   positions crashed React Flow's store init).
+- `usePipelineBody(run)` (`runs/usePipelineBody.ts`) supplies graph/labels/node types: it prefers the
+  run's own `pipeline_body` snapshot (available to non-admins, exact for draft test runs) and only
+  falls back to the studio API (`getVersion`/`getDef`) for runs without one.
+- Scores are 0–10 (`GOOD_SCORE = 8` in `shared.tsx` = the engine gate's default target; scores at or
+  above it get the success tone).
 
 ## Design chat (`/chat`, 2026-11-02)
 
@@ -121,7 +126,7 @@ thread streams each iteration live.
   messages send `thread_id` (+ new input) as a new run in the same thread. Composer: Enter send /
   Shift+Enter newline, Send↔Stop (`cancelRun` on the thread's last run), disabled while any run in
   the thread is non-terminal (statuses relay up from mounted RunCards). Empty state: explainer +
-  3 clickable example prompts. 404/501/503/network → "runs backend isn't available yet" Callout.
+  3 clickable example prompts. 404/501/503/network → "runs backend can't be reached" Callout.
 - `rail.tsx` — thread summaries (`groupThreads`): title = first run's `input.brief` (fallback:
   date), latest-run status dot, run count, relative time.
 - `RunCard.tsx` — one run as a chat turn: header (status, pipeline name/version, Stop, Details);

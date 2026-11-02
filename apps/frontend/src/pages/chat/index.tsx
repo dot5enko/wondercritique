@@ -9,7 +9,7 @@
  * engine can feed previous context (ASSUMPTION in api/runs.ts).
  *
  * The runs/studio backend does not exist yet — until it does, API failures
- * surface as a clear "backend isn't available yet" state instead of crashes.
+ * surface as a clear "backend can't be reached" state instead of crashes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
@@ -240,10 +240,10 @@ export default function ChatPage() {
     <div className="flex h-full min-h-0">
       {backendMissing ? (
         <div className="flex min-w-0 flex-1 items-start justify-center p-6">
-          <Callout tone="warning" title="The runs backend isn't available yet" className="max-w-lg">
+          <Callout tone="warning" title="The runs backend can't be reached" className="max-w-lg">
             <p className="mt-1 text-sm">
-              Chats run pipelines through the runs API, which hasn't been built yet. Configure
-              agents and pipelines in the meantime — this screen lights up once the engine lands.
+              Chats run pipelines through the runs API, which isn't responding. Check that the
+              server is running and reload — your agents and pipelines are unaffected.
             </p>
             {threadsQ.error instanceof Error && (
               <p className="mt-1 font-mono text-2xs text-ink-3">{threadsQ.error.message}</p>
@@ -311,8 +311,8 @@ export default function ChatPage() {
                 )}
                 {threadId && !threadLoading && threadError != null && (
                   threadError != null && isBackendMissing(threadError) ? (
-                    <Callout tone="warning" title="The runs backend isn't available yet">
-                      This chat's history lives in the runs API, which hasn't been built yet.
+                    <Callout tone="warning" title="The runs backend can't be reached">
+                      This chat's history lives in the runs API, which isn't responding right now.
                     </Callout>
                   ) : (
                     <ErrorState error={threadError} onRetry={() => threadId && void loadThread(threadId)} />
@@ -359,8 +359,8 @@ export default function ChatPage() {
               <div className="mx-auto flex max-w-3xl flex-col gap-2 px-4 py-3">
                 {sendError != null && (
                   isBackendMissing(sendError) ? (
-                    <Callout tone="warning" title="The runs backend isn't available yet">
-                      Runs can't start until the engine is built.
+                    <Callout tone="warning" title="The runs backend can't be reached">
+                      Runs can't start while the runs API is unreachable.
                     </Callout>
                   ) : (
                     <Callout tone="danger" title="Couldn't start the run">

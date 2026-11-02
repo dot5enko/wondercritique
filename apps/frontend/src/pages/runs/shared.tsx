@@ -67,6 +67,9 @@ export function formatCost(cost: number | null | undefined): string {
   return `$${cost.toFixed(2)}`
 }
 
+/** Critique scores run 0–10; from here up a design counts as good (the engine gate's default target). */
+export const GOOD_SCORE = 8
+
 /** `0.87` / `42` / `—`. */
 export function formatScore(score: number | null | undefined): string {
   if (score == null || !Number.isFinite(score)) return '—'

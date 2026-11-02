@@ -16,8 +16,9 @@ plan, cross-workstream contracts and status — it reflects the current state on
 | D — studio core | CRUD + versions + restore, export/import, catalog, per-kind validation, defaults seeding | `internal/features/studio/**` (controller.go replaced, + validate/catalog/defaults) | **done 2026-11-02** |
 | E — agent runtime | prompt assembly, agent build/cache, session VFS tools, preview/try/chat mount | `internal/features/agentrun/**` | **done 2026-11-02** |
 | Integration | remaining wiring, full build/test pass, frontend typecheck, DB updates | cross-cutting | **done 2026-11-02** |
+| F — pipeline engine (plan phase 6) | runs/steps/artifacts models, graph scheduler with gate loop edge, node executors, runs API + SSE, `agentrun.RunNode`, catalog prices | `internal/features/engine/**`, `internal/models/run.go`, `internal/features/agentrun/node.go` | **done 2026-11-02** — see `docs/backend.engine.md` |
 
-Verification (2026-11-02): from `apps/backend`, `go build ./... && go vet ./...` clean;
+Verification of A–E + integration (2026-11-02): from `apps/backend`, `go build ./... && go vet ./...` clean;
 `go test ./...` green except `internal/features/render` (pre-existing: root + Chrome sandbox).
 From `apps/backend/agentkit`, `go build/vet/test ./...` all green. Frontend `npm run typecheck`
 green. `fx.ValidateApp(app.Module)` green. Nothing committed (per instructions).
