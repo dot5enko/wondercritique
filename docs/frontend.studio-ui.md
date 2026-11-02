@@ -149,13 +149,18 @@ thread streams each iteration live.
 - `rail.tsx` — `groupThreads` + `ThreadList` (rendered by the Shell sidebar): title = first run's
   `input.brief` (fallback: date), latest-run status dot, run count, relative time.
 - `threads.tsx` — `ThreadsProvider`/`useThreads()` shared thread query (Shell ↔ chat page).
-- `RunCard.tsx` — one run as a chat turn: header (status, pipeline name/version, Stop, Details);
-  per-iteration sections with a score badge, "Score N — critic requested changes" separator
-  before iterations > 1, inline artifacts (HTML preview card, image shots grid, critique cards,
-  ordered by the pipeline body's node order), StepsAccordion for transcripts; live via
-  `streamRunEvents` + `applyRunEvent` + debounced `getRun` refresh (3× retry then "Live updates
-  lost"); final banner shows the best artifact (iframe/image) with best iteration + score;
+- `RunCard.tsx` — one run as a chat turn, flat (no card/padding wrappers): header row (status,
+  pipeline name/version, Stop, Details) + `DesignStage`; live via `streamRunEvents` +
+  `applyRunEvent` + debounced `getRun` refresh (3× retry then "Live updates lost");
   failed/cancelled → Callout with Try-again (parent re-sends the previous message).
+- `DesignStage.tsx` (2026-11-02) — the generated design is the hero. One large render of the
+  selected iteration (image shot preferred; "Live HTML" toggle when an html artifact exists;
+  multi-shot chips; expand → xl Modal); toolbar with prev/next + `n / N` (also ←/→ when focused),
+  score/best/running badges; a one-line "what changed" note (score delta prev→current + the
+  critic's top issues from the previous iteration's merged critique, via `critiquePoints`);
+  filmstrip of all iterations (thumb + score, best marked); critiques + step transcripts hidden
+  behind one "Critiques & steps" toggle. Default selection: latest while running (follows new
+  iterations until the user picks one), best iteration once finished.
 - Drawer: `RunDetailView` in a fixed right-side panel (Esc/backdrop/X close), `?run=` param.
 - Smoke: `tmp/chat-smoke.mjs` (stubbed API, screenshots in `tmp/chat-smoke/`; also covers the
   chats↔settings sidebar switch. Its only console errors are 404s for studio/settings endpoints

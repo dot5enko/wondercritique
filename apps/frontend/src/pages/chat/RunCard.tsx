@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Ban, ListTree, RotateCw } from 'lucide-react'
 import { Button, cx } from '../../ui'
-import { Badge, Callout, Skeleton } from '../../ui/Display'
+import { Callout, Skeleton } from '../../ui/Display'
 import { InlineSpinner } from '../../components/Errors'
 import { useAsync } from '../../hooks'
 import {
@@ -16,32 +16,14 @@ import {
   getRun,
   isTerminalRunStatus,
   streamRunEvents,
-  type Artifact,
   type Run,
   type RunEvent,
   type RunStatus,
 } from '../../api/runs'
 import { usePipelineBody } from '../runs/usePipelineBody'
-import { GOOD_SCORE, RunStatusBadge, formatScore, nodeLabel } from '../runs/shared'
-import { HtmlArtifactCard, ArtifactCritiqueCard, ShotsGrid, useArtifactContent } from '../runs/ArtifactViews'
-import { StepsAccordion } from '../runs/StepsAccordion'
+import { RunStatusBadge, nodeLabel } from '../runs/shared'
+import { DesignStage } from './DesignStage'
 import { applyRunEvent } from '../runs/detail'
-
-/** Final-design preview: the best artifact rendered large (html or image). */
-function BestArtifact({ artifact }: { artifact: Artifact }) {
-  const { content } = useArtifactContent(artifact.id)
-  return (
-    <div className="overflow-hidden rounded-lg border border-accent/40">
-      {artifact.kind === 'image' && content?.kind === 'image' ? (
-        <img src={content.url} alt="Final design" className="w-full bg-white" />
-      ) : content?.text != null ? (
-        <iframe srcDoc={content.text} sandbox="" title="Final design" className="h-96 w-full bg-white" />
-      ) : (
-        <Skeleton className="h-40" />
-      )}
-    </div>
-  )
-}
 
 export function RunCard({
   runId,
@@ -178,27 +160,21 @@ export function RunCard({
   }
 
   const running = !isTerminalRunStatus(run.status)
-  const bestArtifact = run.best_artifact_id
-    ? (run.artifacts.find((a) => a.id === run.best_artifact_id) ?? null)
-    : null
+
+  const nodeOrder = new Map(bodyQ.data?.nodes.map((node, i) => [node.id, i]) ?? [])
+  const bestIteration = bestIterationOf(run, iterations, scoreFor)
 
   return (
-    <div className={cx('overflow-hidden rounded-xl border border-line bg-surface', className)}>
+    <div className={cx('flex flex-col gap-2.5', className)}>
       {/* header */}
-      <div className="flex items-center gap-2 border-b border-line bg-app px-3 py-2">
+      <div className="flex items-center gap-2">
         <RunStatusBadge status={run.status} />
         <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
           {run.pipeline.name}
           {run.pipeline.version != null && ` · v${run.pipeline.version}`}
         </span>
         {running && (
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<Ban />}
-            loading={cancelling}
-            onClick={() => void doCancel()}
-          >
+          <Button size="sm" variant="secondary" icon={<Ban />} loading={cancelling} onClick={() => void doCancel()}>
             Stop
           </Button>
         )}
@@ -207,113 +183,57 @@ export function RunCard({
         </Button>
       </div>
 
-      <div className="flex flex-col gap-3 p-3">
-        {streamError != null && (
-          <Callout tone="danger" title="Live updates lost">
-            <div className="mt-1.5 flex items-center gap-2.5">
-              <span>The event stream dropped after several retries — data may be stale.</span>
-              <Button
-                size="sm"
-                variant="secondary"
-                icon={<RotateCw />}
-                className="shrink-0"
-                onClick={() => {
-                  setStreamError(null)
-                  setStreamEpoch((e) => e + 1)
-                }}
-              >
-                Retry
+      {streamError != null && (
+        <Callout tone="danger" title="Live updates lost">
+          <div className="mt-1.5 flex items-center gap-2.5">
+            <span>The event stream dropped after several retries — data may be stale.</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<RotateCw />}
+              className="shrink-0"
+              onClick={() => {
+                setStreamError(null)
+                setStreamEpoch((e) => e + 1)
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        </Callout>
+      )}
+
+      {run.error && (
+        <Callout
+          tone={run.status === 'interrupted' ? 'warning' : 'danger'}
+          title={run.status === 'interrupted' ? 'Run interrupted' : run.status === 'cancelled' ? 'Run cancelled' : 'Run failed'}
+        >
+          <div className="mt-1 flex flex-wrap items-center gap-2.5">
+            <span className="min-w-0 break-words">{run.error}</span>
+            {onRetry && run.status !== 'interrupted' && (
+              <Button size="sm" variant="secondary" icon={<RotateCw />} className="shrink-0" onClick={onRetry}>
+                Try again
               </Button>
-            </div>
-          </Callout>
-        )}
-
-        {run.error && (
-          <Callout
-            tone={run.status === 'interrupted' ? 'warning' : 'danger'}
-            title={run.status === 'interrupted' ? 'Run interrupted' : run.status === 'cancelled' ? 'Run cancelled' : 'Run failed'}
-          >
-            <div className="mt-1 flex flex-wrap items-center gap-2.5">
-              <span className="min-w-0 break-words">{run.error}</span>
-              {onRetry && run.status !== 'interrupted' && (
-                <Button size="sm" variant="secondary" icon={<RotateCw />} className="shrink-0" onClick={onRetry}>
-                  Try again
-                </Button>
-              )}
-            </div>
-          </Callout>
-        )}
-
-        {/* iterations */}
-        {iterations.length === 0 && running && (
-          <InlineSpinner label="Waiting for the engine to schedule the first iteration…" />
-        )}
-        {iterations.map((n) => {
-          const steps = run.steps.filter((s) => s.iteration === n)
-          const arts = run.artifacts.filter((a) => a.iteration === n)
-          const score = scoreFor(n)
-          const anyRunning = steps.some((s) => s.status === 'running')
-          const order = new Map(bodyQ.data?.nodes.map((node, i) => [node.id, i]) ?? [])
-          const sortedArts = [...arts].sort(
-            (a, b) => (order.get(a.node_id) ?? 99) - (order.get(b.node_id) ?? 99),
-          )
-          return (
-            <div key={n} className="flex flex-col gap-2">
-              {n > 1 && (
-                <p className="flex items-center gap-2 text-xs text-ink-3">
-                  <span className="h-px flex-1 bg-line" />
-                  {scoreFor(n - 1) != null
-                    ? `Score ${formatScore(scoreFor(n - 1))} — critic requested changes`
-                    : 'Critic requested changes'}
-                  <span className="h-px flex-1 bg-line" />
-                </p>
-              )}
-              <div className="flex items-center gap-2">
-                <p className="text-2xs font-semibold tracking-wide text-ink-3 uppercase">Iteration {n}</p>
-                {score != null && <Badge tone={score >= GOOD_SCORE ? 'success' : 'neutral'}>score {formatScore(score)}</Badge>}
-                {anyRunning && <Badge tone="accent">running</Badge>}
-              </div>
-
-              {sortedArts.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  {sortedArts.map((a) => {
-                    if (a.kind === 'image') {
-                      return <ShotsGrid key={a.id} artifacts={[a]} bestArtifactId={run.best_artifact_id} />
-                    }
-                    if (a.kind === 'html') {
-                      return <HtmlArtifactCard key={a.id} artifact={a} title={`${nodeLabels.get(a.node_id) ?? a.node_id} — HTML`} />
-                    }
-                    if (nodeTypes.get(a.node_id) === 'agent') {
-                      return <ArtifactCritiqueCard key={a.id} artifact={a} title={nodeLabels.get(a.node_id) ?? a.node_id} />
-                    }
-                    return null
-                  })}
-                </div>
-              )}
-
-              {steps.length > 0 && <StepsAccordion steps={steps} nodeLabels={nodeLabels} nodeTypes={nodeTypes} />}
-            </div>
-          )
-        })}
-
-        {/* final banner */}
-        {run.status === 'completed' && (
-          <div className="rounded-lg border border-success/30 bg-success-soft px-3 py-2.5">
-            <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
-              Done
-              {bestIterationOf(run, iterations, scoreFor) != null && (
-                <Badge tone="success">best · iteration {bestIterationOf(run, iterations, scoreFor)}</Badge>
-              )}
-              {bestArtifact?.score != null && <Badge tone="accent">score {formatScore(bestArtifact.score)}</Badge>}
-            </p>
-            {bestArtifact && (
-              <div className="mt-2">
-                <BestArtifact artifact={bestArtifact} />
-              </div>
             )}
           </div>
-        )}
-      </div>
+        </Callout>
+      )}
+
+      {iterations.length === 0 && running && (
+        <InlineSpinner label="Waiting for the engine to schedule the first iteration…" />
+      )}
+      {iterations.length > 0 && (
+        <DesignStage
+          run={run}
+          iterations={iterations}
+          scoreFor={scoreFor}
+          nodeLabels={nodeLabels}
+          nodeTypes={nodeTypes}
+          nodeOrder={nodeOrder}
+          running={running}
+          bestIteration={bestIteration}
+        />
+      )}
     </div>
   )
 }
