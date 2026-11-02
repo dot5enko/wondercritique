@@ -16,7 +16,7 @@ import (
 type Result struct {
 	RunID    string
 	Status   store.RunStatus
-	Text     string        // text of the final assistant message
+	Text     string        // final answer: the last assistant message's text, or a terminal tool's output when one ended the run
 	Usage    llm.Usage     // aggregated over all steps
 	Steps    int           // model calls made
 	Messages []llm.Message // messages produced by the run (assistant and tool results), in order
@@ -142,8 +142,18 @@ func (r *runner) loop(input []llm.Message) error {
 			r.res.Text = msg.Text()
 			return nil
 		}
-		if err := r.append(llm.NewMessage(llm.RoleTool, r.execTools(step, calls)...)); err != nil {
+		results, ended := r.execTools(step, calls)
+		if err := r.append(llm.NewMessage(llm.RoleTool, results...)); err != nil {
 			return err
+		}
+		if ended != nil {
+			// A terminal tool executed: its output is the run's final answer and no further model
+			// call happens. Cancellation still takes precedence so an abandoned run is not completed.
+			if err := r.ctx.Err(); err != nil {
+				return err
+			}
+			r.res.Text = ended.out
+			return nil
 		}
 	}
 }
@@ -204,11 +214,20 @@ type toolOutcome struct {
 	call     *ToolCall
 	out      string
 	isErr    bool
+	terminal bool // the call reached a terminal tool, so its output ends the run
 	duration time.Duration
 }
 
-// execTools runs calls in parallel and returns tool_result blocks in call order.
-func (r *runner) execTools(step int, calls []llm.Block) []llm.Block {
+// isTerminalTool reports whether executing t ends the run (see tool.Terminal).
+func isTerminalTool(t tool.Tool) bool {
+	c, ok := t.(tool.Terminal)
+	return ok && c.IsTerminal()
+}
+
+// execTools runs calls in parallel and returns tool_result blocks in call order. When a call
+// reached a terminal tool (unknown tools and vetoed calls do not count as executed), the second
+// return is that call's outcome — the first one in call order — whose output ends the run.
+func (r *runner) execTools(step int, calls []llm.Block) ([]llm.Block, *toolOutcome) {
 	cfg := &r.a.cfg
 	ch := make(chan toolOutcome, len(calls))
 	for i, c := range calls {
@@ -219,6 +238,7 @@ func (r *runner) execTools(step int, calls []llm.Block) []llm.Block {
 			ch <- toolOutcome{i: i, call: tc, out: fmt.Sprintf("unknown tool %q", tc.Name), isErr: true}
 			continue
 		}
+		terminal := isTerminalTool(t)
 		if h := cfg.Hooks.BeforeToolCall; h != nil {
 			if err := h(r.ctx, tc); err != nil {
 				ch <- toolOutcome{i: i, call: tc, out: "tool call rejected: " + err.Error(), isErr: true}
@@ -228,7 +248,7 @@ func (r *runner) execTools(step int, calls []llm.Block) []llm.Block {
 		go func() {
 			start := time.Now()
 			out, err := r.callTool(t, tc)
-			o := toolOutcome{i: i, call: tc, out: out, duration: time.Since(start)}
+			o := toolOutcome{i: i, call: tc, out: out, terminal: terminal, duration: time.Since(start)}
 			if err != nil {
 				o.out, o.isErr = err.Error(), true
 			}
@@ -236,6 +256,7 @@ func (r *runner) execTools(step int, calls []llm.Block) []llm.Block {
 		}()
 	}
 	results := make([]llm.Block, len(calls))
+	var ended *toolOutcome
 	for range calls {
 		o := <-ch
 		tc := o.call
@@ -247,8 +268,11 @@ func (r *runner) execTools(step int, calls []llm.Block) []llm.Block {
 		r.emit(Event{Type: EventToolCallFinished, Step: step, ToolCall: &ToolCallEvent{
 			ID: tc.ID, Name: tc.Name, Input: tc.Input, Output: o.out, IsError: o.isErr, Duration: o.duration,
 		}})
+		if o.terminal && (ended == nil || o.i < ended.i) {
+			ended = &o
+		}
 	}
-	return results
+	return results, ended
 }
 
 // callTool runs one tool with the configured timeout, recovering panics. A tool that ignores

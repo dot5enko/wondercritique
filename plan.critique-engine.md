@@ -252,3 +252,21 @@ per-provider rate limits.
   patched back in and a 256 KiB stack: recursion past the limit throws a catchable RangeError instead of crashing
   the engine. `Config.StackLimit` default 32 KiB ≈ 100 nested calls (util-sized), max 128 KiB. Speed and memory
   are the same as upstream's binary.
+- 2026-11-02: phase 3 partial — agentkit terminal tools (`tool.Terminal`/`tool.AsTerminal`, run
+  loop finishes on a terminal tool; tests in `agentkit/terminal_test.go`) and provider adapters
+  (`agentkit/llm/{responses,chat,anthropic}`; `llm/meta` refactored to a preset over `responses`;
+  shared plumbing in `agentkit/llm/internal/wire`).
+- 2026-11-02: phase 4 — providers feature (`internal/features/llm`): models.dev sync (24h TTL,
+  ETag, offline-safe), AES-GCM key storage (`SECRETS_KEY`, dev fallback from JWT_SECRET, prod
+  enforced at startup), adapter resolution per §3.2, `/settings/providers` admin API, provider
+  factory with per-provider RPM limiters. Demo `internal/features/agents` deleted; chat goes
+  through the seeded agents (phase 5).
+- 2026-11-02: phase 5 — studio backend (`internal/features/studio` + `internal/features/agentrun`):
+  definition CRUD + immutable versions + restore, export/import bundles, live catalog, per-kind
+  validation incl. pipeline graph validation, defaults seeding (model set, 4 agents, design-loop
+  pipeline, component-format rules); agent runtime (prompt assembly, draft/published resolution,
+  model-set fallback resolution, cached agent builds, session-scoped VFS tools, preview/try SSE,
+  generic chat mount `/agents/{slug}`). Full pass: backend + agentkit build/vet/test green
+  (render tests fail in this environment — pre-existing), `fx.ValidateApp` green, frontend
+  typecheck green. Details: `docs/backend.studio.md`, status/notes: `docs/backend.plan.md`.
+  Phase 6 (engine/runs) not started.

@@ -54,15 +54,20 @@ Studio pages switch list↔editor via the `?id=` search param inside their `inde
 
 ## API contract status (important)
 
-The studio/settings/runs **backend does not exist yet** (plan phases 4–6). The `src/api/*` modules
-are the authoritative frontend contract typed from `plan.critique-engine.md` §3.3–§5 + §4.7; open
-points are marked `ASSUMPTION` comments in `studio.ts`/`settings.ts`/`runs.ts` (path segment ==
-kind string — NOTE the studio paths are SINGULAR (`/studio/pipeline`, `/studio/agent`), list
-envelope `{items, next_cursor}`, version/restore shapes, export/import bundle, SSE event payloads,
-and since 2026-11-02 the chat-thread fields in `runs.ts`: `StartRunBody.thread_id`/`pipeline_id`,
-`RunListItem.thread_id`/`input`, `Run.thread_id`, `listRuns({filter:{thread_id}})`). When the
-backend lands, reconcile only those marked spots. `agents.ts` matches the existing agentkit
-httpapi surface (docs/backend.md).
+**Studio + settings backend implemented (2026-11-02, plan phases 3–5)** — `docs/backend.studio.md`
+is the backend reference. Reconciled and verified by `npm run typecheck`:
+- `studio.ts` — generic CRUD (SINGULAR kind paths), list envelope `{items, next_cursor}`,
+  versions/restore, export/import bundle, catalog (`StudioCatalog` matches `studio.CatalogData`),
+  preview/try (`/studio/agents/{id}/preview|try`, try = SSE with the same event mapping as chat),
+  `/studio/pipelines/{id}/validate` → `{ok, issues}`. The remaining `ASSUMPTION` comments in
+  `studio.ts` are resolved in the implemented shapes (draft/versions shapes match; `next_cursor`
+  is always `null` for now — list offset/limit supported).
+- `settings.ts` — `GET/PUT /settings/providers/{id}`, `/test`, `/catalog/refresh` implemented
+  (`synced_at`, `model_count`, `has_key` only, `rpm_limit: null` = unlimited).
+- `agents.ts` — the generic chat mount `/agents/{slug}/…` serves every published agent
+  (agentkit httpapi surface, unchanged).
+- `runs.ts` — **still stubbed** (engine = phase 6): `/runs*` endpoints do not exist yet; the
+  `thread_id`/pipeline fields remain ASSUMPTIONs until then.
 
 ## Commands
 
@@ -86,17 +91,20 @@ vhost with SPA fallback (see `docs/deploy.ansible.md`). Production API is cross-
 
 ## Known gaps / TODO
 
-- Studio/runs/settings **backend missing** (see API contract status): studio pages show a
-  "backend isn't available yet" Callout (via `isBackendMissing`), the design chat shows the same
-  instead of starting runs.
+- Studio/settings backends exist (2026-11-02); the studio pages can drop their "backend isn't
+  available yet" callouts (`isBackendMissing`) once wired to the real API. The design chat still
+  needs the runs engine (phase 6).
 - Identity (name/slug/description) of studio defs is fixed at creation — no `PUT /{kind}/{id}`
-  endpoint in the plan; editors render identity read-only. Backend decision pending.
+  endpoint by design; editors render identity read-only.
 - Skill "run script in the sandbox" has no endpoint yet (`TODO` in `SkillsEditor.tsx`).
 - Agent-chat session titles are local-only (no title-update endpoint; first message truncates to 60 chars).
-- Design chat thread titles depend on the ASSUMPTION `input.brief` on run list items (fallback: date).
+- Design chat thread titles depend on the ASSUMPTION `input.brief` on run list items (fallback: date) — runs API pending.
 - Cross-run compare (`?compare=`) not implemented (iterations-compare is).
 - Deprecated-provider toggle in Settings skipped (models.dev marks models, not providers, deprecated).
-- `docs/llm.models-catalog.md` is the catalog format reference for the Settings page.
+- `docs/llm.models-catalog.md` is the catalog format reference for the Settings page (now parsed
+  server-side; adapter resolution + base-URL vars live in `internal/features/llm`).
+- Import bundles that cross-reference defs by id (agent → model_set_id) only import cleanly into
+  a database containing those ids; cross-database import needs id remapping (future work).
 
 ## Verification (2026-11-02)
 

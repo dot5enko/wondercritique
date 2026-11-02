@@ -1,4 +1,6 @@
-// Package tool defines tools callable by agents and typed helpers to build them.
+// Package tool defines tools callable by agents and typed helpers to build them. A tool
+// wrapped with AsTerminal (or implementing Terminal) ends the agent run when the model calls
+// it; see Terminal.
 package tool
 
 import (

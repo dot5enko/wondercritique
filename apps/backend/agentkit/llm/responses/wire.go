@@ -1,9 +1,8 @@
 // Wire-format helpers: request building (Responses API, stateless encrypted
 // reasoning replay) and SSE consumption.
-package meta
+package responses
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -12,29 +11,50 @@ import (
 	"strings"
 
 	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm/internal/wire"
 )
 
-// errStopped is returned by consume when the consumer stopped the stream; it is not an error.
-var errStopped = errors.New("meta: consumer stopped")
+// APIError is a non-200 HTTP response from a Responses API endpoint.
+type APIError = wire.APIError
+
+// StreamError is a terminal failure reported inside a 200 SSE stream (response.failed or error event).
+type StreamError struct {
+	Event   string // "response.failed" or "error"
+	Code    string // e.g. server_error, rate_limit_exceeded, server_shutting_down
+	Message string
+	Param   string
+}
+
+func (e *StreamError) Error() string {
+	s := e.Event
+	if e.Code != "" {
+		s += " " + e.Code
+	}
+	if e.Message != "" {
+		s += ": " + e.Message
+	}
+	return s
+}
 
 // effortLevels are accepted values of reasoning.effort. "none" is rejected by Muse Spark.
 var effortLevels = map[string]bool{"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true}
 
-// buildBody maps an llm.Request to the Responses API request body.
-func buildBody(req *llm.Request, defaultModel string) ([]byte, error) {
+// buildBody maps an llm.Request to the Responses API request body. name is the
+// provider identity used for reasoning-block replay validation and error messages.
+func buildBody(req *llm.Request, defaultModel, name string) ([]byte, error) {
 	model := req.Model
 	if model == "" {
 		model = defaultModel
 	}
 	if req.ReasoningEffort != "" {
 		if strings.EqualFold(req.ReasoningEffort, "none") {
-			return nil, fmt.Errorf("meta: reasoning effort %q is not supported by Muse Spark", req.ReasoningEffort)
+			return nil, fmt.Errorf("%s: reasoning effort %q is not supported", name, req.ReasoningEffort)
 		}
 		if !effortLevels[strings.ToLower(req.ReasoningEffort)] {
-			return nil, fmt.Errorf("meta: invalid reasoning effort %q", req.ReasoningEffort)
+			return nil, fmt.Errorf("%s: invalid reasoning effort %q", name, req.ReasoningEffort)
 		}
 	}
-	input, err := buildInput(req.Messages)
+	input, err := buildInput(req.Messages, name)
 	if err != nil {
 		return nil, err
 	}
@@ -78,12 +98,23 @@ func buildBody(req *llm.Request, defaultModel string) ([]byte, error) {
 	return json.Marshal(body)
 }
 
-// BuildInput maps conversation history to Responses API input items. Exported
-// for hosts that need to preview what a request will contain.
-func BuildInput(messages []llm.Message) ([]map[string]any, error) { return buildInput(messages) }
+// BuildInput maps conversation history to Responses API input items, using the
+// default provider identity. Exported for hosts that need to preview what a
+// request will contain.
+func BuildInput(messages []llm.Message) ([]map[string]any, error) {
+	return buildInput(messages, DefaultName)
+}
 
-// buildInput maps conversation history to Responses API input items.
-func buildInput(messages []llm.Message) ([]map[string]any, error) {
+// BuildInputAs maps conversation history to Responses API input items using
+// name as the provider identity: reasoning blocks tagged with that name are
+// replayed verbatim, blocks tagged otherwise are skipped.
+func BuildInputAs(name string, messages []llm.Message) ([]map[string]any, error) {
+	return buildInput(messages, name)
+}
+
+// buildInput maps conversation history to Responses API input items. name is
+// the provider identity whose reasoning blocks are replayable.
+func buildInput(messages []llm.Message, name string) ([]map[string]any, error) {
 	var items []map[string]any
 	needsAssistant := false // a reasoning item must be followed by an assistant message or function_call
 	appendAssistant := func() {
@@ -122,10 +153,10 @@ func buildInput(messages []llm.Message) ([]map[string]any, error) {
 			for _, b := range m.Blocks {
 				switch b.Type {
 				case llm.BlockReasoning:
-					if b.Provider != "" && b.Provider != ProviderName {
+					if b.Provider != "" && b.Provider != name {
 						continue // reasoning from another provider is not replayable here
 					}
-					opaque, err := replayReasoning(b.Opaque)
+					opaque, err := replayReasoning(b.Opaque, name)
 					if err != nil {
 						return nil, err
 					}
@@ -175,15 +206,17 @@ func buildInput(messages []llm.Message) ([]map[string]any, error) {
 	return items, nil
 }
 
+// ProviderIdentity is unused; replay identity is threaded through buildInput.
+
 // replayReasoning returns the reasoning item to send as input: the opaque
 // payload verbatim, with a summary key ensured.
-func replayReasoning(opaque json.RawMessage) (map[string]any, error) {
+func replayReasoning(opaque json.RawMessage, name string) (map[string]any, error) {
 	if len(opaque) == 0 {
-		return nil, errors.New("meta: reasoning block without opaque payload cannot be replayed")
+		return nil, errors.New(name + ": reasoning block without opaque payload cannot be replayed")
 	}
 	var item map[string]any
 	if err := json.Unmarshal(opaque, &item); err != nil {
-		return nil, fmt.Errorf("meta: invalid reasoning payload: %w", err)
+		return nil, fmt.Errorf("%s: invalid reasoning payload: %w", name, err)
 	}
 	if _, ok := item["summary"]; !ok {
 		item["summary"] = []any{}
@@ -202,50 +235,16 @@ func callID(id string) string {
 	return "mk_" + fmt.Sprintf("%x", sha256.Sum256([]byte(id)))[:16]
 }
 
-// consume reads an SSE stream and drives yield. It returns errStopped when the
-// consumer stopped, and other errors for stream failures.
-func consume(r io.Reader, yield func(llm.StreamEvent, error) bool) error {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64<<10), 4<<20) // data lines can be long
-
-	asm := newAssembler()
-	var eventName string
-	var data []string
-	flush := func() error {
-		if len(data) == 0 {
-			eventName = ""
-			return nil
+// consume reads an SSE stream and drives yield. It returns wire.ErrStop when
+// the consumer stopped, and other errors for stream failures.
+func (p *Provider) consume(r io.Reader, yield func(llm.StreamEvent, error) bool) error {
+	asm := newAssembler(p.cfg.Name, yield)
+	return wire.DrainEvents(r, func(ev wire.Event) error {
+		if ev.Done() {
+			return wire.ErrStop
 		}
-		payload := strings.Join(data, "\n")
-		data = nil
-		name := eventName
-		eventName = ""
-		if payload == "[DONE]" {
-			return errStopped
-		}
-		return asm.handle(name, payload, yield)
-	}
-	for sc.Scan() {
-		line := sc.Text()
-		switch {
-		case line == "":
-			if err := flush(); err != nil {
-				return err
-			}
-		case strings.HasPrefix(line, ":"):
-			// comment/keepalive
-		case strings.HasPrefix(line, "event:"):
-			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			data = append(data, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-		default:
-			// ignore unknown lines
-		}
-	}
-	if err := sc.Err(); err != nil {
-		return err
-	}
-	return flush()
+		return asm.handle(ev.Name, ev.Data)
+	})
 }
 
 // item is a decoded Responses API output item.
@@ -268,14 +267,16 @@ type item struct {
 
 // assembler builds the final assistant message from the response's output items.
 type assembler struct {
-	yield func(llm.StreamEvent, error) bool
-	seen  bool // any output received at all
+	prefix string // provider name used in error strings
+	yield  func(llm.StreamEvent, error) bool
+	seen   bool // any output received at all
 }
 
-func newAssembler() *assembler { return &assembler{} }
+func newAssembler(name string, yield func(llm.StreamEvent, error) bool) *assembler {
+	return &assembler{prefix: name, yield: yield}
+}
 
-func (a *assembler) handle(event, payload string, yield func(llm.StreamEvent, error) bool) error {
-	a.yield = yield
+func (a *assembler) handle(event, payload string) error {
 	var envelope struct {
 		Type     string          `json:"type"`
 		Delta    string          `json:"delta"`
@@ -288,7 +289,7 @@ func (a *assembler) handle(event, payload string, yield func(llm.StreamEvent, er
 		Item json.RawMessage `json:"item"`
 	}
 	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
-		return fmt.Errorf("meta: bad SSE payload: %w", err)
+		return fmt.Errorf("%s: bad SSE payload: %w", a.prefix, err)
 	}
 	typ := envelope.Type
 	if typ == "" {
@@ -359,7 +360,7 @@ func (a *assembler) handle(event, payload string, yield func(llm.StreamEvent, er
 			} `json:"response"`
 		}
 		if err := json.Unmarshal(envelope.Response, &body.Response); err != nil {
-			return fmt.Errorf("meta: bad response envelope: %w", err)
+			return fmt.Errorf("%s: bad response envelope: %w", a.prefix, err)
 		}
 		if body.Response.Error != nil && body.Response.Error.Message != "" {
 			return a.fail(&StreamError{Event: typ, Code: body.Response.Error.Code, Message: body.Response.Error.Message})
@@ -385,14 +386,14 @@ func (a *assembler) handle(event, payload string, yield func(llm.StreamEvent, er
 
 func (a *assembler) emit(ev llm.StreamEvent) error {
 	if !a.yield(ev, nil) {
-		return errStopped
+		return wire.ErrStop
 	}
 	return nil
 }
 
 func (a *assembler) fail(err error) error {
-	a.yield(llm.StreamEvent{}, err)
-	return errStopped // the error was delivered; stop silently
+	a.yield(llm.StreamEvent{}, fmt.Errorf("%s: %w", a.prefix, err))
+	return wire.ErrStop // the error was delivered; stop silently
 }
 
 // buildMessage assembles the assistant llm.Message from output items in order.
@@ -402,7 +403,7 @@ func (a *assembler) buildMessage(output []json.RawMessage) (llm.Message, string,
 	for _, raw := range output {
 		var it item
 		if err := json.Unmarshal(raw, &it); err != nil {
-			return msg, stop, fmt.Errorf("meta: bad output item: %w", err)
+			return msg, stop, fmt.Errorf("%s: bad output item: %w", a.prefix, err)
 		}
 		switch it.Type {
 		case "reasoning":
@@ -410,7 +411,7 @@ func (a *assembler) buildMessage(output []json.RawMessage) (llm.Message, string,
 			for _, s := range it.Summary {
 				summary.WriteString(s.Text)
 			}
-			msg.Blocks = append(msg.Blocks, llm.ReasoningBlock(ProviderName, raw, summary.String()))
+			msg.Blocks = append(msg.Blocks, llm.ReasoningBlock(a.prefix, raw, summary.String()))
 		case "message":
 			for _, c := range it.Content {
 				if c.Type == "output_text" {

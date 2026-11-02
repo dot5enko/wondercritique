@@ -212,19 +212,26 @@ Package `internal/features/messages` (`messages.Module`). A worked example of th
 `GET/PATCH/DELETE /api/v1/messages/{id}`, all behind `auth.Required`, scoped with `owner_id = <authenticated user>`
 (set by a `BeforeCreate` hook; the `owner_id` field is not writable). List supports `filter[thread_id]` and `sort=role`.
 
-## Agents (`/api/v1/agents/critic`)
+## Agents (chat with any published agent — `/api/v1/agents/{slug}`)
 
-Package `internal/features/agents` (`agents.Module`) wires the `agentkit` SDK into the app: a `critic` agent using
-the Meta Model API, mounted from `agentkit/httpapi` behind `auth.Required`. Sessions are scoped to the authenticated
-user (`metadata.owner`, derived from the access token; other users' sessions 404). Without `MODEL_API_KEY` the routes
-answer 503 `unavailable` instead of failing at startup.
+Package `internal/features/agentrun` (`agentrun.Module`, see `docs/backend.studio.md`) replaces the
+deleted demo `critic` package. Chat endpoints require auth (not admin): the published agent def is
+resolved by slug (404 unknown/unpublished), a `*agentkit.Agent` is built per (def id, version) and
+cached, and `agentkit/httpapi` is served with `SessionOwner` = authenticated user id (sessions
+owner-scoped, other users' sessions 404). Provider unconfigured → 503 `unavailable`. The endpoint
+table below is unchanged; it now serves every published agent slug.
 
 Mounting gotcha (fixed 2026-11-02): `httpapi.New` returns a Go 1.22 `*http.ServeMux` with mount-relative patterns
-(`GET /sessions`, …), but chi's `Mount` does not rewrite `r.URL.Path` for plain `http.Handler`s — the mux saw the
-full original path and answered its own plain-text `404 page not found` for every authenticated request (anonymous
-ones got 401 from the auth middleware first, masking the routing bug). `Controller.Routes` now wraps the handler and
+(`GET /sessions`, …), but chi's `Mount` does not rewrite `r.URL.Path` for plain `http.Handler`s — the controller
 rewrites `req.URL.Path` to `chi.RouteContext(req.Context()).RoutePath` before serving. Note this also makes the root
 request logger print the rewritten path (the handler mutates the request in place before the logger reads it).
+
+## Studio backend
+
+Packages `internal/features/studio` (definition CRUD, catalog, validation, defaults),
+`internal/features/llm` (models.dev providers, admin settings API) and
+`internal/features/agentrun` (prompt assembly, agent build/cache, preview/try/chat) implement
+plan phases 3–5 — see `docs/backend.studio.md` for the full API table and semantics.
 
 ## agentkit (separate module)
 
@@ -233,20 +240,24 @@ dependency in its core. See `agentkit/README.md` for the embedding API.
 
 - `agentkit/llm` — provider-neutral messages (text, image, tool calls, tool results, reasoning with opaque
   provider payloads) and the streaming `Provider` interface.
-- `agentkit/llm/meta` — Meta Model API via the Responses API: `store:false`, stateless encrypted reasoning replay
-  (the model's chain of thought travels with the history, nothing is stored at Meta), streamed tool-call arguments,
-  retries with backoff on 429/5xx before the stream starts. Default model `muse-spark-1.3-contributor`
-  (**contributor mode: heavily discounted tokens; in exchange Meta may use request content and responses to train
-  future models**, and the limit is 150 requests/min). Standard-mode models can be selected via `AGENT_MODEL`.
+- `agentkit/llm/{responses,chat,anthropic}` — provider adapters (2026-11-02): `responses` is the generic
+  OpenAI Responses API adapter extracted from `llm/meta` (stateless encrypted reasoning replay, streamed
+  tool calls, retries with backoff on 429/5xx before the stream starts, `Retry-After`); `chat` speaks the
+  OpenAI Chat Completions wire protocol (incl. `reasoning_content`, parallel tool-call delta assembly);
+  `anthropic` speaks the Messages API (extended thinking with signatures, `max_tokens` required — default
+  8192). Shared HTTP/SSE plumbing in `agentkit/llm/internal/wire`. `llm/meta` is a thin preset over
+  `responses` with Meta's base URL/default model (`muse-spark-1.3-contributor`, **contributor mode**).
 - `agentkit/tool` — typed tools: `tool.New(name, desc, func(ctx, in In) (Out, error))` derives the JSON schema
-  from `In`.
+  from `In`. A tool satisfying `tool.Terminal` (or wrapped with `tool.AsTerminal`) ends the run when it
+  executes: its output string becomes the run's final answer and no further model call happens (see
+  `docs/backend.plan.md`, "Terminal tool semantics").
 - `agentkit/store` + `store/sqlite` / `store/memory` — persistence for sessions, messages, runs and tool calls,
   sharing the app's SQLite file (tables prefixed `agent_`).
 - `agentkit/httpapi` — HTTP API over an agent: session CRUD and runs streamed as SSE.
-- `agentkit/fxagent` — fx wiring (`fxagent.Provide("critic", ctor)`, `fxagent.SQLiteStore()`).
+- `agentkit/fxagent` — fx wiring (`fxagent.SQLiteStore()`; `fxagent.Provide(name, ctor)` for named agents).
 - `agentkit/vfs` + `agentkit/tools/fstools` — virtual file system and file tools (see `docs/backend.vfs.md`).
-- `agentkit/sandbox/jsrun` — JS sandbox (QuickJS-NG wasm on wazero) and the `run_js` tool; not wired into any
-  agent yet (see `docs/backend.sandbox.md`).
+- `agentkit/sandbox/jsrun` — JS sandbox (QuickJS-NG wasm on wazero) and the `run_js` tool (see
+  `docs/backend.sandbox.md`); wired into studio agents via the agent runtime since 2026-11-02.
 
 ### agentkit internals relevant for extending it (researched 2026-11-01)
 
@@ -260,15 +271,16 @@ dependency in its core. See `agentkit/README.md` for the embedding API.
 - Meta wire (`llm/meta/wire.go`): image blocks in messages → `input_image`; tool results → `function_call_output`
   with a string output only.
 - Run loop (`run.go`): each step builds `llm.Request` from `Config` + `ContextPolicy` history, calls
-  `Hooks.BeforeRequest` (may rewrite the whole request, e.g. messages), streams, persists. A run ends **only when the
-  model answers without tool calls** (or `ErrMaxSteps`/cancel). There are no "terminal" tools or structured-output
-  helpers; `Config.Extra` is passed through to the provider request.
+  `Hooks.BeforeRequest` (may rewrite the whole request, e.g. messages), streams, persists. A run ends
+  when the model answers without tool calls, **when an executed tool call reached a terminal tool**
+  (`tool.Terminal` — its output becomes the final answer, 2026-11-02), or with `ErrMaxSteps`/cancel.
+  `Config.Extra` is passed through to the provider request.
 - `Hooks.BeforeToolCall` can veto (error → error tool result) or rewrite `call.Input`.
-- Present but not wired into the critic agent yet (2026-11-01): virtual FS + file tools
-  (`docs/backend.vfs.md`), JS sandbox `run_js` (`docs/backend.sandbox.md`), HTML render service
-  (`docs/backend.render.md`). The critic agent has no tools.
+- Present but wired since 2026-11-02 (studio agents): virtual FS + file tools
+  (`docs/backend.vfs.md`), JS sandbox `run_js` (`docs/backend.sandbox.md`). The HTML render service
+  (`docs/backend.render.md`) is engine-side (phase 6), not an agent tool yet.
 
-### Agent HTTP endpoints (mounted at `/api/v1/agents/critic`)
+### Agent HTTP endpoints (mounted at `/api/v1/agents/{slug}` for any published agent)
 
 | Method | Path | Notes |
 |---|---|---|

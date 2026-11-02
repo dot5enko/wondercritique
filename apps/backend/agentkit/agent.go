@@ -1,5 +1,11 @@
 // Package agentkit is an embeddable LLM agent runtime: a streaming tool loop over a
 // provider-neutral model interface with pluggable persistence.
+//
+// A tool that satisfies tool.Terminal (wrap one with tool.AsTerminal) ends the run when it
+// executes: its output string becomes the run's final answer and no further model call is
+// made. A failed terminal call contributes its error text — what the run records as the tool
+// result output — as the final answer and still completes the run; vetoed calls and unknown
+// tools never executed, so they do not end the run.
 package agentkit
 
 import (

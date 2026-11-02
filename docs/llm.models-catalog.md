@@ -1,7 +1,9 @@
 # models.dev catalog (external LLM provider/model registry)
 
 Researched 2026-11-01 from `https://models.dev/api.json` (~6 MB, no auth). Snapshot used for research:
-`tmp/modelsdev/api.json`. Not wired into the backend yet.
+`tmp/modelsdev/api.json` (not present in this environment; the parser is tested against a fixture).
+**Wired into the backend since 2026-11-02** — `internal/features/llm` (`docs/backend.studio.md`):
+startup sync (24h TTL, ETag, offline-safe), admin settings API and provider construction.
 
 ## Shape
 

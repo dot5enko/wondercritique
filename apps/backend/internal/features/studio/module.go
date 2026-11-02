@@ -5,6 +5,9 @@
 package studio
 
 import (
+	"context"
+	"log/slog"
+
 	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
@@ -17,4 +20,12 @@ var Module = fx.Options(
 	dbx.AsModel(&models.StudioDefVersion{}),
 	fx.Provide(NewStore),
 	httpx.AsController(NewController),
+	fx.Invoke(Seed),
 )
+
+// Seed inserts the built-in defaults on an empty database (runs after migrations).
+func Seed(lc fx.Lifecycle, store *Store, log *slog.Logger) {
+	lc.Append(fx.StartHook(func(ctx context.Context) error {
+		return SeedDefaults(ctx, store, log)
+	}))
+}
