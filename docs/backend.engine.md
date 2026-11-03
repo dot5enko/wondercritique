@@ -31,9 +31,9 @@ in-memory DB answers parallel writers with SQLITE_LOCKED). Tests use a fake `Nod
 
 | Route | Notes |
 |---|---|
-| `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, thread_id?, is_test?}` → **201** `{id, thread_id, status}`; the run executes in the background |
-| `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input |
-| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) |
+| `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, thread_id?, is_test?, context_artifact_ids?}` → **201** `{id, thread_id, status}`; the run executes in the background |
+| `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input, context_artifact_ids (always an array) |
+| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) + `context_artifact_ids` |
 | `GET /runs/{id}/events` | SSE; replays the run's history, then live; closes after `run_completed`/`run_failed`; `: ping` every 15 s. SSE requests skip the 60 s request timeout |
 | `POST /runs/{id}/cancel` | 204; 409 when already finished; a stale (not executing) pending/running row is marked cancelled |
 | `GET /artifacts/{id}/content` | blob with its stored MIME; `nosniff` + `Content-Security-Policy: … sandbox`; access follows the run's owner scoping |
@@ -98,6 +98,14 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
 - **Follow-ups**: a run with `thread_id` seeds iteration 1's loop value with `## Earlier in this
   chat` — the previous brief and the thread's latest completed best HTML — so "make it dark" builds
   on the last design (only reaches agents whose template uses the loop port, e.g. `{{feedback}}`).
+- **Selected components** (2026-11-04, canvas UI): `context_artifact_ids` (≤ 12 html artifacts the
+  caller may see; deduplicated; unknown/foreign/non-html → 400 with a `context_artifact_ids` field
+  error) are stored on the run (`runs.context_artifact_ids`, JSON) and seed iteration 1's loop value
+  with `## Selected components` — every component's id + fenced HTML (≈ 60 000 chars total budget,
+  ≥ 2 000 per component) and an instruction to edit them / derive variants from them per the brief.
+  This **replaces** the "Earlier in this chat" context for that run. Works with or without
+  `thread_id` (`selectionContext`/`resolveSelection` in `start.go`; test
+  `TestSelectedComponentsSeedTheRun`).
 - Cost: `Σ ModelCost.Estimate(usage)` over steps whose model has a models.dev price (the catalog
   parser now keeps per-model `cost`; `llm.Service.ModelCost(provider, model)`); unpriced → `cost`
   nil and budgets are not enforced.

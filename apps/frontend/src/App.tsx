@@ -4,8 +4,9 @@
  * Route table:
  *   /login                          public — email-code login, no shell
  *   /showcase                       dev-only design-system showcase (no shell)
+ *   /chat                           chat list + "New chat" (full screen, no shell); ?thread=x → /chat/x
+ *   /chat/:threadId, /chat/new      full-screen design canvas of one chat (no shell)
  *   /          (auth shell)         → redirect to /chat
- *   /chat                           design chat: every chat = a pipeline run
  *   /runs/:id                       full run details (opened from the chat); /runs → /chat
  *   /studio/*, /settings/providers  admin-only configuration (settings sidebar); /settings → providers
  *
@@ -16,11 +17,13 @@ import { Suspense, lazy } from 'react'
 import { Outlet, createBrowserRouter, redirect, RouterProvider } from 'react-router'
 import { AuthProvider, BootScreen, RequireAdmin, RequireAuth } from './features/auth'
 import Shell from './pages/shell'
+import { ThreadsProvider } from './pages/chat/threads'
 
 const LoginPage = lazy(() => import('./pages/login'))
 const ShowcasePage = lazy(() => import('./pages/showcase'))
 const RunDetailPage = lazy(() => import('./pages/runs/detail'))
-const ChatPage = lazy(() => import('./pages/chat'))
+const ChatListPage = lazy(() => import('./pages/chat'))
+const CanvasPage = lazy(() => import('./pages/chat/canvas'))
 const SettingsPage = lazy(() => import('./pages/settings'))
 const PipelinesPage = lazy(() => import('./pages/studio/pipelines'))
 const AgentsPage = lazy(() => import('./pages/studio/agents'))
@@ -42,6 +45,29 @@ const router = createBrowserRouter([
       { path: '/login', element: <LoginPage /> },
       ...(import.meta.env.DEV ? [{ path: '/showcase', element: <ShowcasePage /> }] : []),
       {
+        // Chats are full screen: no shell, no sidebar.
+        element: (
+          <RequireAuth>
+            <ThreadsProvider>
+              <Outlet />
+            </ThreadsProvider>
+          </RequireAuth>
+        ),
+        children: [
+          {
+            path: '/chat',
+            loader: ({ request }) => {
+              const legacy = new URL(request.url).searchParams.get('thread')
+              return legacy ? redirect(`/chat/${encodeURIComponent(legacy)}`) : null
+            },
+            element: <ChatListPage />,
+          },
+          // `new` is a param value (not its own route) so the canvas stays mounted
+          // when the first message turns /chat/new into /chat/<thread>.
+          { path: '/chat/:threadId', element: <CanvasPage /> },
+        ],
+      },
+      {
         element: (
           <RequireAuth>
             <Shell />
@@ -49,7 +75,6 @@ const router = createBrowserRouter([
         ),
         children: [
           { index: true, loader: () => redirect('/chat') },
-          { path: 'chat', element: <ChatPage /> },
           { path: 'runs', loader: () => redirect('/chat') },
           { path: 'runs/:id', element: <RunDetailPage /> },
           {

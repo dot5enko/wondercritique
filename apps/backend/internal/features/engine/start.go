@@ -33,12 +33,16 @@ type StartParams struct {
 	IsTest            bool
 	// Input values are JSON strings or {"artifact_id": "..."} objects.
 	Input map[string]json.RawMessage
+	// ContextIDs are html artifacts (canvas components) the message refers to.
+	ContextIDs []string
 }
 
 const (
 	maxInputText   = 100_000
 	maxInputImage  = 8 << 20
 	maxContextHTML = 60_000
+	// maxContextComponents caps context_artifact_ids per run.
+	maxContextComponents = 12
 )
 
 var inputKeyRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$`)
@@ -64,6 +68,10 @@ func (e *Engine) Start(ctx context.Context, p StartParams) (*models.Run, error) 
 	if err != nil {
 		return nil, err
 	}
+	selected, err := e.resolveSelection(ctx, p)
+	if err != nil {
+		return nil, err
+	}
 
 	run := &models.Run{
 		Base:         models.Base{ID: models.NewID()},
@@ -75,13 +83,19 @@ func (e *Engine) Start(ctx context.Context, p StartParams) (*models.Run, error) 
 		IsTest:       p.IsTest,
 		Status:       models.RunPending,
 	}
+	for _, s := range selected {
+		run.ContextArtifactIDs = append(run.ContextArtifactIDs, s.ID)
+	}
 	var seed *portVal
 	if p.ThreadID == "" {
 		run.ThreadID = run.ID
-	} else {
-		if err := e.checkThread(ctx, p); err != nil {
-			return nil, err
-		}
+	} else if err := e.checkThread(ctx, p); err != nil {
+		return nil, err
+	}
+	switch {
+	case len(selected) > 0:
+		seed = selectionContext(selected)
+	case p.ThreadID != "":
 		seed = e.threadContext(ctx, p.ThreadID)
 	}
 	if ver != nil {
@@ -383,6 +397,55 @@ func (e *Engine) threadContext(ctx context.Context, threadID string) *portVal {
 		}
 	}
 	fmt.Fprintf(&b, "\n### Previous HTML\n\n```html\n%s\n```", truncate(string(blob.Data), maxContextHTML))
+	return &portVal{Text: b.String()}
+}
+
+// selectedComponent is one resolved context_artifact_ids entry.
+type selectedComponent struct {
+	ID   string
+	HTML string
+}
+
+// resolveSelection loads the selected canvas components: html artifacts of
+// runs the viewer may see, deduplicated, in request order.
+func (e *Engine) resolveSelection(ctx context.Context, p StartParams) ([]selectedComponent, error) {
+	if len(p.ContextIDs) > maxContextComponents {
+		return nil, apperr.Invalid("invalid input", map[string]string{
+			"context_artifact_ids": fmt.Sprintf("at most %d components", maxContextComponents),
+		})
+	}
+	seen := map[string]bool{}
+	var out []selectedComponent
+	for _, id := range p.ContextIDs {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		art, _, err := e.artifactFor(ctx, id, p.Viewer)
+		if err != nil || art.Kind != models.ArtifactHTML {
+			return nil, apperr.Invalid("invalid input", map[string]string{"context_artifact_ids": "component " + id + " not found"})
+		}
+		blob, err := e.Blobs.Get(ctx, art.BlobSHA)
+		if err != nil {
+			return nil, apperr.Invalid("invalid input", map[string]string{"context_artifact_ids": "component " + id + " is unavailable"})
+		}
+		out = append(out, selectedComponent{ID: id, HTML: string(blob.Data)})
+	}
+	return out, nil
+}
+
+// selectionContext seeds a run with the components the user selected; it
+// replaces the generic "earlier in this chat" context.
+func selectionContext(sel []selectedComponent) *portVal {
+	var b strings.Builder
+	b.WriteString("## Selected components\n\nThe user selected these components on the canvas; the new brief is about them. ")
+	b.WriteString("Start from their HTML and apply the brief (a change request edits them, a variants request derives new versions of them).\n")
+	budget := maxContextHTML
+	for i, s := range sel {
+		html := truncate(s.HTML, max(budget, 2000))
+		budget -= len(html)
+		fmt.Fprintf(&b, "\n### Component %d (id %s)\n\n```html\n%s\n```\n", i+1, s.ID, html)
+	}
 	return &portVal{Text: b.String()}
 }
 

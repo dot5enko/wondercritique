@@ -35,6 +35,8 @@ type RunListItem struct {
 	CreatedAt  time.Time          `json:"created_at"`
 	ThreadID   string             `json:"thread_id"`
 	Input      json.RawMessage    `json:"input"`
+	// ContextArtifactIDs are the canvas components the message referred to.
+	ContextArtifactIDs []string `json:"context_artifact_ids"`
 }
 
 // StepView is a run step.
@@ -69,23 +71,24 @@ type ArtifactView struct {
 
 // RunDetail is GET /runs/{id}.
 type RunDetail struct {
-	ID                string             `json:"id"`
-	Status            string             `json:"status"`
-	Pipeline          PipelineRef        `json:"pipeline"`
-	PipelineVersionID string             `json:"pipeline_version_id"`
-	IsTest            bool               `json:"is_test"`
-	Input             json.RawMessage    `json:"input"`
-	Iteration         int                `json:"iteration"`
-	BestArtifactID    *string            `json:"best_artifact_id"`
-	Usage             *models.TokenUsage `json:"usage"`
-	Cost              *float64           `json:"cost"`
-	Error             *string            `json:"error"`
-	CreatedAt         time.Time          `json:"created_at"`
-	UpdatedAt         time.Time          `json:"updated_at"`
-	ThreadID          string             `json:"thread_id"`
-	PipelineBody      json.RawMessage    `json:"pipeline_body,omitempty"` // the pinned snapshot, for graph labels
-	Steps             []StepView         `json:"steps"`
-	Artifacts         []ArtifactView     `json:"artifacts"`
+	ID                 string             `json:"id"`
+	Status             string             `json:"status"`
+	Pipeline           PipelineRef        `json:"pipeline"`
+	PipelineVersionID  string             `json:"pipeline_version_id"`
+	IsTest             bool               `json:"is_test"`
+	Input              json.RawMessage    `json:"input"`
+	Iteration          int                `json:"iteration"`
+	BestArtifactID     *string            `json:"best_artifact_id"`
+	Usage              *models.TokenUsage `json:"usage"`
+	Cost               *float64           `json:"cost"`
+	Error              *string            `json:"error"`
+	CreatedAt          time.Time          `json:"created_at"`
+	UpdatedAt          time.Time          `json:"updated_at"`
+	ThreadID           string             `json:"thread_id"`
+	PipelineBody       json.RawMessage    `json:"pipeline_body,omitempty"` // the pinned snapshot, for graph labels
+	ContextArtifactIDs []string           `json:"context_artifact_ids"`
+	Steps              []StepView         `json:"steps"`
+	Artifacts          []ArtifactView     `json:"artifacts"`
 	// Results are the run's results in display order: one entry (the selected
 	// final artifact) or every component of a multi-component result.
 	Results []ResultView `json:"results"`
@@ -148,7 +151,8 @@ func (e *Engine) RunDetail(ctx context.Context, id string, v Viewer) (*RunDetail
 		ID: run.ID, Status: run.Status, Pipeline: pipelineRef(run), PipelineVersionID: run.PipelineVersionID,
 		IsTest: run.IsTest, Input: run.Input, Iteration: run.Iteration, BestArtifactID: run.BestArtifactID,
 		Usage: &run.Usage, Cost: run.Cost, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, ThreadID: run.ThreadID, PipelineBody: run.Snapshot,
-		Steps: make([]StepView, 0, len(steps)), Artifacts: make([]ArtifactView, 0, len(arts)),
+		ContextArtifactIDs: nonNil(run.ContextArtifactIDs),
+		Steps:              make([]StepView, 0, len(steps)), Artifacts: make([]ArtifactView, 0, len(arts)),
 		Results: make([]ResultView, 0, len(results)),
 	}
 	for _, r := range results {
@@ -202,10 +206,18 @@ func (e *Engine) ListRuns(ctx context.Context, v Viewer, p ListParams) ([]RunLis
 		out = append(out, RunListItem{
 			ID: r.ID, Status: r.Status, Pipeline: pipelineRef(r), Iterations: r.Iteration,
 			BestScore: r.BestScore, Usage: &r.Usage, Cost: r.Cost, CreatedAt: r.CreatedAt,
-			ThreadID: r.ThreadID, Input: r.Input,
+			ThreadID: r.ThreadID, Input: r.Input, ContextArtifactIDs: nonNil(r.ContextArtifactIDs),
 		})
 	}
 	return out, nil
+}
+
+// nonNil keeps empty id lists serializing as [] instead of null.
+func nonNil(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // artifactFor loads an artifact whose run the viewer may see.

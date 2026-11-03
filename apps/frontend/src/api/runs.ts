@@ -42,6 +42,11 @@ export interface StartRunBody {
    */
   pipeline_id?: string
   input: Record<string, RunInputValue>
+  /**
+   * Canvas components (html artifact ids) the message is about — the engine
+   * seeds the generator with their HTML ("## Selected components"), max 12.
+   */
+  context_artifact_ids?: string[]
 }
 
 /** POST /runs → 201 `{id, thread_id, status}`; the run executes in the background. */
@@ -71,6 +76,8 @@ export interface RunListItem {
   thread_id?: string | null
   /** Used to title chat threads by their first brief. */
   input?: Record<string, RunInputValue>
+  /** Canvas components the message referred to (always an array from the engine). */
+  context_artifact_ids?: string[]
 }
 
 export interface ListRunsParams {
@@ -219,6 +226,8 @@ export interface Run {
   thread_id?: string | null
   /** The pipeline body this run executed (pinned snapshot; present for every viewer). */
   pipeline_body?: PipelineBody
+  /** Canvas components the message referred to. */
+  context_artifact_ids?: string[]
   steps: RunStep[]
   artifacts: Artifact[]
   /** Results in display order: one (the selected artifact) or every component of a multi-component result. */

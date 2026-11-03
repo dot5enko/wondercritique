@@ -1,7 +1,7 @@
 # Frontend
 
-State as of 2026-11-02 (chat-first restructure: design chat as the main screen, run list removed,
-pipeline editor onboarding). Base stack unchanged.
+State as of 2026-11-04 (canvas UI: full-screen chat list + full-screen pan/zoom design canvas per
+chat, no sidebar on chat routes). Base stack unchanged.
 
 ## Location & stack
 
@@ -34,24 +34,30 @@ pipeline editor onboarding). Base stack unchanged.
 |---|---|---|
 | `/login` | public | email-code login (start → verify, resend countdown from 60 s / `Retry-After`) |
 | `/` | auth | redirect → `/chat` |
-| `/chat` | auth | **Design chat** — every chat is a pipeline run (`src/pages/chat/`, see `docs/frontend.studio-ui.md`) |
-| `/runs/:id` | auth | full run detail (`RunDetailView` from `src/pages/runs/detail.tsx`; also embedded in the chat drawer). `/runs` redirects to `/chat` — the run list was removed; history lives in the chat rail |
+| `/chat` | auth, **no shell** | chat list + "New chat" (`pages/chat/index.tsx`); legacy `?thread=x` redirects (loader) to `/chat/x` |
+| `/chat/:threadId` | auth, **no shell** | full-screen design canvas of one chat (`pages/chat/canvas/`, see `docs/frontend.studio-ui.md`); `threadId = new` is a new chat (a param value, not its own route, so the canvas stays mounted when the first message turns it into `/chat/<thread>`) |
+| `/runs/:id` | auth | full run detail (`RunDetailView` from `src/pages/runs/detail.tsx`; also embedded in the canvas drawer). `/runs` redirects to `/chat` |
 | `/studio/pipelines` | admin | list + `?id=` graph editor (`src/pages/studio/pipelines/`) |
 | `/studio/agents` | admin | list + `?id=` editor + Try-it modal |
 | `/studio/model-sets` | admin | list + `?id=` editor |
 | `/studio/skills`, `/studio/rules` | admin | lists + `?id=` editors |
 | `/settings/providers` | admin | LLM providers (two-pane list/detail); `/settings` redirects here |
 
+**Chat routes skip the Shell (2026-11-04):** `/chat` and `/chat/:threadId` live in their own
+route group (`RequireAuth` + `ThreadsProvider` + `Outlet`) — full screen, no sidebar. The Shell
+below only frames `/runs/:id` and the settings/studio pages.
+
 Shell layout (`src/pages/shell.tsx`, 2026-11-02): viewport frame + **one** sidebar column (`w-60`),
 always exactly one level deep, two modes:
-- **Chats mode** (default, every non-settings route): header "Wonder Critique" + New-chat
-  IconButton (→ `/chat`); body = the design-chat thread list (`ThreadList` from
-  `pages/chat/rail.tsx`, click → `/chat?thread=<id>`); footer = a single "Settings" NavItem
+- **Chats mode** (default, every non-settings route — now effectively only `/runs/:id`): header
+  "Wonder Critique" + New-chat IconButton (→ `/chat/new`); body = the design-chat thread list
+  (`ThreadList` from `pages/chat/rail.tsx`, click → `/chat/<id>`); footer = a single "Settings" NavItem
   (admin only, → `/studio/pipelines`) + user footer (Avatar, name/email, role Badge, logout).
 - **Settings mode** (admin and path `/studio/*` or `/settings*`): header "Settings", "Back to
   chats", then a flat list: Pipelines, Agents, Models (`/studio/model-sets`), Providers
   (`/settings/providers`), Skills, Rules.
-**Collapsible sidebar (2026-11-02):** only on `/chat`. The chats sidebar header has a
+**Collapsible sidebar (2026-11-02, now dormant):** only on `/chat`, which no longer renders inside
+the Shell — the collapse code and `useShellLayout()` are unused since 2026-11-04. The chats sidebar header has a
 `PanelLeftClose` IconButton; collapsed = sidebar fully hidden (no rail). Animated: the sidebar
 stays mounted inside a wrapper whose width transitions `w-60 ↔ w-0` (200 ms, `inert` +
 `aria-hidden` when hidden); the chat column's max-width transitions too, and the title-bar
@@ -63,8 +69,8 @@ regardless of the stored flag. State persisted in localStorage `wc_sidebar_colla
 `pages/shell.tsx`) → `{ sidebarCollapsed, toggleSidebar }`; `sidebarCollapsed` is the effective
 value (false outside `/chat`). The chat page's timeline + composer column is
 `w-full max-w-[1250px]` (fluid on smaller screens), `max-w-[1400px]` when collapsed.
-The thread list is shared via `ThreadsProvider`/`useThreads()` (`pages/chat/threads.tsx`,
-mounted by Shell, one `listRuns({limit:100})` query) — the chat page reads and reloads it.
+The thread list is shared via `ThreadsProvider`/`useThreads()` (`pages/chat/threads.tsx`, one
+`listRuns({limit:100})` query) — mounted by the Shell and, separately, by the chat route group.
 Non-admins never see Settings and get a Forbidden page on admin routes. There is deliberately
 **no standalone agent chat** (removed 2026-11-02): agents are only used through pipelines; the
 agent editor's Try-it modal is the only direct way to call one.
@@ -145,5 +151,5 @@ are SINGULAR (`/studio/pipeline`, `/studio/agent`) — smoke stubs must match.
 
 - `pages/chat/RunProgress.tsx`: big elapsed timer (mm:ss.t, ticks 10×/s while running, frozen after
   the run) + per-step timeline with durations + a slim live activity line from `step_activity`
-  events (RunCard keeps `activity` by node id). Replaces the chat-style "waiting" spinner; the stage
+  events (`canvas/useRunLive` keeps `activity` by node id; rendered in each canvas group header). Replaces the chat-style "waiting" spinner; the stage
   placeholder is a skeleton.

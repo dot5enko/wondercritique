@@ -148,7 +148,7 @@ function ChatsSidebar({ pathname, collapseButton }: { pathname: string; collapse
       className="w-60"
       actions={
         <>
-          <IconButton icon={<SquarePen />} label="New chat" size="sm" onClick={() => navigate('/chat')} />
+          <IconButton icon={<SquarePen />} label="New chat" size="sm" onClick={() => navigate('/chat/new')} />
           {collapseButton}
         </>
       }
@@ -167,7 +167,7 @@ function ChatsSidebar({ pathname, collapseButton }: { pathname: string; collapse
           loading={query.loading && query.data == null}
           error={query.error}
           activeId={activeId}
-          onSelect={(id) => navigate(`/chat?thread=${encodeURIComponent(id)}`)}
+          onSelect={(id) => navigate(`/chat/${encodeURIComponent(id)}`)}
           onRetry={query.reload}
         />
       </SidebarSection>

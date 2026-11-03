@@ -54,6 +54,8 @@ type startRequest struct {
 	ThreadID          string                     `json:"thread_id"`
 	IsTest            bool                       `json:"is_test"`
 	Input             map[string]json.RawMessage `json:"input" validate:"required"`
+	// ContextArtifactIDs are selected canvas components the message refers to.
+	ContextArtifactIDs []string `json:"context_artifact_ids"`
 }
 
 // start answers 201 `{id, thread_id, status}`; the run executes in the
@@ -70,6 +72,7 @@ func (c *Controller) start(w http.ResponseWriter, r *http.Request) error {
 		ThreadID:          req.ThreadID,
 		IsTest:            req.IsTest,
 		Input:             req.Input,
+		ContextIDs:        req.ContextArtifactIDs,
 	})
 	if err != nil {
 		return err

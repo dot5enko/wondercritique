@@ -212,10 +212,7 @@ export function RunCard({
       {/* header */}
       <div className="flex items-center gap-2">
         <RunStatusBadge status={run.status} />
-        <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
-          {run.pipeline.name}
-          {run.pipeline.version != null && ` · v${run.pipeline.version}`}
-        </span>
+        <span className="min-w-0 flex-1" />
         {!active && onShow && (
           <Button size="sm" variant="ghost" onClick={onShow}>
             View

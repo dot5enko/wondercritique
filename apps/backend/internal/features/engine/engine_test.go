@@ -650,6 +650,52 @@ func TestFollowUpRunSeedsPreviousDesign(t *testing.T) {
 	}
 }
 
+func TestSelectedComponentsSeedTheRun(t *testing.T) {
+	h := setup(t)
+	h.scripted([]float64{9}, []float64{9})
+	first, _ := h.start(h.user, `{"input":{"brief":"A login form"}}`)
+	h.waitDone(first)
+	d := h.detail(first)
+	if d.BestArtifactID == nil {
+		t.Fatalf("no best artifact")
+	}
+	comp := *d.BestArtifactID
+
+	second, w := h.start(h.user, `{"thread_id":"`+first+`","context_artifact_ids":["`+comp+`","`+comp+`"],"input":{"brief":"make it dark"}}`)
+	if second == "" {
+		t.Fatalf("start: %d %s", w.Code, w.Body)
+	}
+	h.waitDone(second)
+	gen := h.agents.callsOf("component-generator")
+	fb, _ := gen[len(gen)-1].Samples["feedback"].(string)
+	for _, want := range []string{"## Selected components", "id " + comp, "design 1"} {
+		if !strings.Contains(fb, want) {
+			t.Errorf("selection context lacks %q:\n%s", want, fb)
+		}
+	}
+	if strings.Contains(fb, "Earlier in this chat") {
+		t.Errorf("selection should replace the thread context:\n%s", fb)
+	}
+	if got := h.detail(second).ContextArtifactIDs; len(got) != 1 || got[0] != comp {
+		t.Errorf("context ids = %v", got)
+	}
+	if got := h.detail(first).ContextArtifactIDs; got == nil || len(got) != 0 {
+		t.Errorf("first run context ids = %#v, want []", got)
+	}
+
+	// Unknown, non-html and foreign components are rejected.
+	for _, body := range []string{
+		`{"context_artifact_ids":["nope"],"input":{"brief":"x"}}`,
+	} {
+		if _, w := h.start(h.user, body); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	if _, w := h.start(h.other, `{"context_artifact_ids":["`+comp+`"],"input":{"brief":"x"}}`); w.Code != http.StatusBadRequest {
+		t.Errorf("foreign component: %d", w.Code)
+	}
+}
+
 func TestTestRunUsesPipelineDraft(t *testing.T) {
 	h := setup(t)
 	h.scripted([]float64{9}, []float64{9})

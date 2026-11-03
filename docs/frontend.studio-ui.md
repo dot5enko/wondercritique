@@ -1,6 +1,6 @@
 # Frontend — Studio, Runs, Design chat sections
 
-State as of 2026-11-02 (runs/chat now served by the real engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
+State as of 2026-11-04 (design chat rebuilt as a full-screen canvas; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
 (see `docs/frontend.md` for stack/router/API-layer/auth). All data fetching goes through
 `src/api/*`; shared UI from `src/components/*`; forms bound via `useDirtyDraft` with
 debounced autosave to `PUT /studio/{kind}/{id}/draft` and `VersionBar` for publishing.
@@ -108,7 +108,7 @@ lives at reserved `config.label` (filtered out of generated SchemaForms).
 
 ## Runs (plan §5)
 
-The **runs list page was removed** (2026-11-02): history lives in the design-chat rail, `/runs`
+The **runs list page was removed** (2026-11-02): history lives in the chat list, `/runs`
 redirects to `/chat`. What remains under `src/pages/runs/`:
 
 - `detail.tsx` — `RunDetailView({runId})` (the full run UI: header with status/usage/cancel,
@@ -128,56 +128,77 @@ redirects to `/chat`. What remains under `src/pages/runs/`:
 - Scores are 0–10 (`GOOD_SCORE = 8` in `shared.tsx` = the engine gate's default target; scores at or
   above it get the success tone).
 
-## Design chat (`/chat`, 2026-11-02)
+## Design canvas (`/chat`, `/chat/:threadId`, 2026-11-04)
 
-Every chat = pipeline runs (`src/pages/chat/`): the user describes what they want designed →
-a run starts (generator → render → critic → gate → regenerate while the score is low) → the
-thread streams each iteration live.
+Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.tsx` in
+`pages/chat/` are no longer routed — dead code kept for now; `RunProgress.tsx` and `rail.tsx`
+(`groupThreads`) are still used). Full screen, no Shell/sidebar, touch-first (tablet/phone).
 
-- `index.tsx` — timeline + composer only (no own rail column; the thread list lives in the Shell
-  sidebar). Header row only for an open thread (title + run count). Threads come from
-  `useThreads()` (`threads.tsx`, grouped client-side from `listRuns({limit:100})` by
-  `thread_id ?? id`); `?thread=<id>` deep links, `?run=<id>` opens the details drawer.
-  Switching thread clears a stale send error. New chats pick a published pipeline (preselect: last choice in localStorage
-  `wc_chat_pipeline` → slug `default` → first; admin-only studio API → 403 hides the picker and
-  the run starts on the default published pipeline). The message maps to the Input node's first
-  non-image field (fallback `brief`); other required fields render as an inline form. Follow-up
-  messages send `thread_id` (+ new input) as a new run in the same thread. Composer (2026-11-02): floating
-  one-line pill (`<input>`, not textarea; fixed `max-w-[720px]`, centered, rounded-full, shadow + accent
-  focus ring, no top border bar); chat column max width is a constant 1150px (sidebar collapsed or not).
-  Enter sends, Send↔Stop (`cancelRun` on the thread's last run), disabled while any run in
-  the thread is non-terminal (statuses relay up from mounted RunCards). Empty state: explainer +
-  3 clickable example prompts. 404/501/503/network → "runs backend can't be reached" Callout.
-- `rail.tsx` — `groupThreads` + `ThreadList` (rendered by the Shell sidebar): title = first run's
-  `input.brief` (fallback: date), latest-run status dot, run count, relative time.
-- `threads.tsx` — `ThreadsProvider`/`useThreads()` shared thread query (Shell ↔ chat page).
-- `RunCard.tsx` — one run as a chat turn, flat (no card/padding wrappers): header row (status,
-  pipeline name/version, Stop, Details) + `DesignStage`; live via `streamRunEvents` +
-  `applyRunEvent` + debounced `getRun` refresh (3× retry then "Live updates lost");
-  failed/cancelled → Callout with Try-again (parent re-sends the previous message).
-- `DesignStage.tsx` (2026-11-02) — the generated design is the hero. One large render of the
-  selected iteration (image shot preferred; "Live HTML" toggle when an html artifact exists;
-  multi-shot chips; expand → xl Modal); toolbar with prev/next + `n / N` (also ←/→ when focused),
-  score/best/running badges; a one-line "what changed" note (score delta prev→current + the
-  critic's top issues from the previous iteration's merged critique, via `critiquePoints`);
-  filmstrip of all iterations (thumb + score, best marked); critiques + step transcripts hidden
-  behind one "Critiques & steps" toggle. Default selection: latest while running (follows new
-  iterations until the user picks one), best iteration once finished.
-- **Canvas + floating chat (2026-11-02) — supersedes the timeline/composer layout described above.**
-  The page body is a canvas (`max-w-[1400px]`) that shows only the design: `RunCard` keeps its
-  header/Stop/Details/errors/`RunProgress` in the chat panel and **portals `DesignStage` into the canvas
-  element** (`canvasEl` state in `index.tsx`; `active` = the run shown, default last run, "View" button on
-  older runs). The chat (user bubbles, run status rows, pipeline picker, extras, composer) lives in a
-  floating bottom-right panel (400px, `absolute`, header with Minimize); minimized → round floating
-  button (pulse dot while busy). The panel stays mounted (`hidden`) when minimized so SSE/status keep
-  flowing; open state in localStorage `wc_chat_open`. Top bar renders only when the sidebar is collapsed.
-  No-thread canvas shows the explainer + example prompts (clicking one fills the composer and opens chat).
-  `RunProgress` is one slim row (small timer + activity phrase) over a 3px segmented bar (name · duration
-  in `title` tooltips). Stage render area `max-h-[calc(100vh-14rem)]`.
-- Drawer: `RunDetailView` in a fixed right-side panel (Esc/backdrop/X close), `?run=` param.
-- Smoke: `tmp/chat-smoke.mjs` (stubbed API, screenshots in `tmp/chat-smoke/`; also covers the
-  chats↔settings sidebar switch. Its only console errors are 404s for studio/settings endpoints
-  the stub doesn't serve).
+- **Chat list** (`pages/chat/index.tsx`): header (app name, Settings icon for admins → studio,
+  logout, primary "New chat" → `/chat/new`) + one list of threads from `useThreads()` (status dot,
+  title = first brief, relative time, message count) → `/chat/<id>`. Nothing else.
+- **Canvas page** (`pages/chat/canvas/index.tsx`): one chat. Model: **message = run = group**,
+  **result artifact = component**. Runs of the thread (`listRuns filter[thread_id]`, oldest first)
+  render as `RunGroup`s stacked top→bottom in a world container; DOM flex layout does the placement
+  (no stored positions, no dragging of elements).
+  - Floating chrome: top-left back + chat title, top-right zoom − / % (click = 100%) / + / fit all;
+    bottom `Composer`. Empty new chat → centered explainer card with 3 example prompts.
+  - Auto-fit: a ResizeObserver on the content keeps the **latest group** fitted (insets top 72 /
+    bottom 150) until the user pans/zooms (`autoFit` ref); re-armed after each send and on chat
+    switch. Keys: `+`/`-` zoom, `Shift+1` fit all, `Esc` clears selection.
+  - Overscroll disabled on `<html>` while mounted; viewport meta has `viewport-fit=cover,
+    interactive-widget=resizes-content`; chrome uses `env(safe-area-inset-*)`.
+- **`useViewport`** (`canvas/useViewport.ts`): view `{x,y,k}` in a ref, applied imperatively as a
+  2D `translate() scale()` on the world (no React render per frame; 2D so iframes re-raster
+  crisply); also sets `--inv-k` (1/k) on the world and moves the dotted background. One handler
+  owns every pointer on the viewport (`touch-none`): 1-pointer drag = pan (no element dragging),
+  2 pointers = pinch zoom around the midpoint + pan, wheel = pan, ctrl/⌘+wheel (incl. trackpad
+  pinch) = zoom at cursor, Safari `gesture*` events prevented. Tap → `onTap({target, additive})`;
+  long press (touch/pen, 450 ms, cancelled by >8px movement or a 2nd finger, `vibrate(8)`) or
+  `contextmenu` (right click / Android) → `onMenu`. Targets = nearest `[data-sel]` (`c:<artifactId>`
+  component, `g:<runId>` group); `[data-canvas-ui]` subtrees (group header buttons) keep their own
+  clicks. `rectOf` measures via offset chains (transform/animation-proof); `fitRect`, `zoomBy`,
+  `setView` (optional 220 ms transition). Zoom 5%–400%.
+- **`RunGroup`** (`canvas/RunGroup.tsx`): `<section data-sel="g:<run>" data-group>` transparent
+  rounded block (`bg-ink/[0.035]`, outline when selected — outline widths use `--inv-k` so they
+  stay ~3px on screen). Header = index + message text + "about 1.2, 2.1" (labels of the run's
+  `context_artifact_ids`) + `RunProgress` while running + error line + Stop / Try again /
+  Reconnect / Details buttons; header and component labels use CSS `zoom: min(4, max(1, --inv-k))`
+  (`CHROME_ZOOM`) so they stay readable when zoomed out. Live data via `useRunLive` (getRun + SSE
+  + debounced refetch after step/iteration/terminal events — moved out of the old RunCard).
+  `componentsOf(run)`: `results` (position order) → else completed `best_artifact_id` → else the
+  latest iteration's html artifacts as **drafts** (dimmed, "draft" tag). Reports components and
+  status up (`onComponents`, `onStatus`).
+- **`ComponentFrame`** (`canvas/ComponentFrame.tsx`): `[data-sel="c:<id>"]`, label `i.j` (message i,
+  component j) + score, then the HTML in an iframe `sandbox="allow-scripts"` (opaque origin) with
+  `pointer-events-none`. HTML cached per artifact id for the session (`loadComponentHtml`). An
+  injected script postMessages `{__wcFrame, w, h}` (parent checks `e.source`): rendered at 1280px
+  first; if the visible non-full-width boxes span < 75% the frame shrinks once to that width
+  (+ up to 48px margins each side, min 320); height = content bottom (not `scrollHeight`, which
+  never drops below the frame), clamped 64–6000, followed via ResizeObserver + delayed re-measures.
+- **Selection**: ordered keys (`c:`/`g:`). Tap = select only it (tap again = deselect), Shift/⌘/Ctrl
+  or "Select more" mode (banner in the composer with Done) = toggle; tap on empty canvas clears
+  (not in select mode). Long press on an unselected target selects it (adds in select mode).
+  Selection shows as removable chips in the composer ("1.2", "Group 3"); sending expands groups to
+  their component ids → `startRun({input:{[field]: text}, thread_id?, context_artifact_ids})`
+  (max 12; see `docs/backend.engine.md` "Selected components"). `field` = default pipeline's first
+  non-image input field (admin-only lookup) else `brief`. Sending is allowed while other runs are
+  still going (each message is its own group); the first message of `/chat/new` navigates
+  (replace) to `/chat/<thread>`.
+- **Context menu** (`canvas/ContextMenu.tsx`, fixed at the press point, clamped/flipped, touch rows
+  `pointer-coarse:h-11`): with a selection — quick requests that **just send a message** about the
+  selection (Generate variants, Improve the design, Adapt for mobile, Dark version — `QUICK_ACTIONS`),
+  Describe a change… (focuses the composer), Select more / Done selecting, Open preview + Copy HTML
+  (single component), Run details (drawer with `RunDetailView`), Clear selection. On empty canvas:
+  Fit everything, Go to latest, New message.
+- **Composer** (`canvas/Composer.tsx`): floating bottom-center card, chips row, auto-growing textarea
+  at 16px (no iOS focus zoom), Enter sends / Shift+Enter newline (IME-safe), Send button.
+- Smoke (2026-11-04): `tmp/canvas-smoke/smoke.mjs <dist> <out>` — playwright-core (installed in
+  `tmp/canvas-smoke`) drives `/usr/bin/google-chrome` headless as a touch tablet (820×1180), serving
+  `apps/frontend/dist` and a stubbed `/api/v1` purely through `context.route` (no dev server, no
+  backend); touch gestures via CDP `Input.dispatchTouchEvent`. Covers list, legacy redirect, frame
+  shrink/height, context refs, tap select, long-press menu, select-more, pinch zoom, pan, quick
+  action payload, group selection expansion, new chat, zero console errors.
 
 **Layout width (2026-11-02).** `pages/shell.tsx` wraps the Outlet of all settings/studio pages in a `max-w-[1100px]` centered column; only the pipeline graph editor (`/studio/pipelines?id=`) is full-bleed. Pages must not set their own wider max-width. `Modal` sizes: sm/md/lg/xl (xl = `max-w-5xl`).
 
@@ -186,5 +207,4 @@ thread streams each iteration live.
 - Agent editor (`AgentForm.tsx`): "Candidate tools" card appears when generate_components /
   pick_best / critique_component are enabled; edits `tool_config` (agent pickers from
   `catalog.agents`, max count). Model-set strategy is single|fallback only.
-- Chat `DesignStage.tsx`: when `run.results.length > 1` and the run is finished it shows a gallery
-  of the result components (live HTML tiles) instead of the iteration stage.
+- Canvas: every entry of `run.results` is its own component on the canvas (see Design canvas).

@@ -52,6 +52,9 @@ type Run struct {
 	Snapshot          json.RawMessage `gorm:"type:text"` // the pipeline body executed
 	IsTest            bool
 	Input             json.RawMessage `gorm:"type:text"`
+	// ContextArtifactIDs are the canvas components the user selected for this
+	// message; their HTML is seeded into the run (see engine threadContext).
+	ContextArtifactIDs []string `gorm:"serializer:json"`
 
 	Status         string `gorm:"index;size:16"`
 	Iteration      int
