@@ -14,6 +14,10 @@
   ansible.builtin.command:
     cmd: npm run build
     chdir: "{{ frontend_source_dir }}"
+  environment:
+    # Origin only; the client appends /api/v1. Without it the SPA posts to its
+    # own static vhost, which answers 405 to every API call.
+    VITE_API_BASE_URL: "{{ frontend_api_base_url }}"
   changed_when: true
 
 - name: Remove previously installed assets

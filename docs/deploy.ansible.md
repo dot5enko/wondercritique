@@ -90,6 +90,11 @@ deploy/ansible/
   `immutable` 1-y cache on `/assets/`, gzip; handler `Reload nginx for frontend`
   (name deliberately differs from nginx role's `Reload nginx` — handler names
   are per-play and would shadow each other)
+- build env (2026-11-03): `VITE_API_BASE_URL={{ frontend_api_base_url }}`
+  (default `https://{{ vault_backend_domain }}`, origin only — client appends
+  `/api/v1`). Without it the SPA posted API calls to the static vhost → nginx
+  405 on `/api/v1/auth/email_code/start`. Cross-origin, so
+  `backend_cors_origins` must hold the frontend origin
 - health check: `GET http://127.0.0.1/` with `Host: {{ vault_frontend_domain }}`
   must return 200
 - knobs (`roles/frontend/defaults/main.yml`): `frontend_install_dir`,
@@ -106,8 +111,9 @@ deploy/ansible/
 
 ## Vars (group_vars/all/vars.yml + vault.yml)
 
-- `backend_cors_origins: []` — rendered into backend `CORS_ORIGINS`;
-  frontend origin goes here for cross-origin API calls
+- `backend_cors_origins` — default `["https://{{ vault_frontend_domain }}"]`
+  (since 2026-11-03), rendered into backend `CORS_ORIGINS` for cross-origin
+  API calls from the SPA
 - renderer knobs (`roles/backend/defaults/main.yml`, added 2026-11-01):
   `backend_render_chrome_path` (empty = auto-detect),
   `backend_render_concurrency` (2), `backend_render_timeout` (`20s`),

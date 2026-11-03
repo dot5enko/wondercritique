@@ -13,5 +13,10 @@ frontend_nginx_conf_path: /etc/nginx/conf.d/wonder-critique-frontend.conf
 frontend_assets_path: /assets/
 frontend_asset_max_age: 31536000
 
+# API origin baked into the SPA bundle at build time (VITE_API_BASE_URL).
+# Origin only, no /api/v1 suffix. Cross-origin, so the frontend origin must be
+# in backend_cors_origins.
+frontend_api_base_url: "https://{{ vault_backend_domain }}"
+
 # Source tree to build. Default = sibling of this deploy directory.
 frontend_source_dir: "{{ playbook_dir }}/../../apps/frontend"

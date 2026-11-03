@@ -2,9 +2,10 @@
 
 interface ImportMetaEnv {
   /**
-   * Root of the backend API, including the `/api/v1` prefix.
-   * Default (`''`) = same origin, so dev requests go through the Vite proxy
-   * (`/api` → http://localhost:8080) and prod is served behind the same domain.
+   * Origin of the backend API, without the `/api/v1` prefix (appended by
+   * `api/client.ts`). Default (`''`) = same origin, so dev requests go through
+   * the Vite proxy (`/api` → http://localhost:8080). Production sets it to the
+   * backend domain at build time (Ansible `frontend_api_base_url`).
    */
   readonly VITE_API_BASE_URL?: string
 }

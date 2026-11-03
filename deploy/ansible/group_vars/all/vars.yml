@@ -16,6 +16,5 @@ vault_frontend_domain: ""
 
 # CORS origins allowed to call the API (rendered into CORS_ORIGINS env var,
 # comma separated). Add your frontend origins here, e.g.:
-#   backend_cors_origins:
-#     - https://wonder-critique.cldfn.com
-backend_cors_origins: []
+backend_cors_origins:
+  - "https://{{ vault_frontend_domain }}"

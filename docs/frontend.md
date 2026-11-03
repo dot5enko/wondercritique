@@ -111,7 +111,8 @@ run detail additionally smoke-tested by their agents with stubbed API, `tmp/pipe
 
 Unchanged from 2026-10-31: `frontend` Ansible role builds on the box and serves `dist/` via nginx
 vhost with SPA fallback (see `docs/deploy.ansible.md`). Production API is cross-origin on
-`vault_backend_domain` (base URL override `VITE_API_BASE_URL`); the origin must stay in
+`vault_backend_domain`; the Ansible frontend role bakes `VITE_API_BASE_URL` (origin only, no
+`/api/v1`) into the build (since 2026-11-03), and the frontend origin must stay in
 `backend_cors_origins`.
 
 ## Known gaps / TODO
