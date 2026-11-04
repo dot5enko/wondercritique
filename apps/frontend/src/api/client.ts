@@ -271,3 +271,30 @@ export async function apiBlob(path: string, opts: RequestOptions = {}): Promise<
   const res = await send('GET', path, undefined, opts)
   return URL.createObjectURL(await res.blob())
 }
+
+/** A file download: the body plus the name from `Content-Disposition` (`null` when absent). */
+export interface DownloadedFile {
+  blob: Blob
+  filename: string | null
+}
+
+/** POSTs JSON and returns the (binary) response as a file, e.g. an export. */
+export async function apiPostFile(path: string, body?: unknown, opts: RequestOptions = {}): Promise<DownloadedFile> {
+  const res = await send('POST', path, body, { ...opts, headers: { Accept: '*/*', ...opts.headers } })
+  const disposition = res.headers.get('Content-Disposition') ?? ''
+  const m = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition)
+  const filename = m ? decodeURIComponent(m[1] ?? m[2]) : null
+  return { blob: await res.blob(), filename }
+}
+
+/** Saves a blob through a temporary `<a download>`. */
+export function saveFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}

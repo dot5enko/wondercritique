@@ -56,7 +56,7 @@ func NewRouter(p RouterParams) *chi.Mux {
 			AllowedOrigins: p.Config.CORSOrigins,
 			AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 			AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "X-Request-Id"},
-			ExposedHeaders: []string{"X-Request-Id"},
+			ExposedHeaders: []string{"X-Request-Id", "Content-Disposition"},
 			MaxAge:         300,
 		}))
 	}

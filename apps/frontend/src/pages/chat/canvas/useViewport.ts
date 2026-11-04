@@ -362,6 +362,10 @@ export function useViewport(
 
     const onContextMenu = (e: MouseEvent): void => {
       e.preventDefault()
+      // The press that opened the menu must not end as a tap: Android may fire contextmenu
+      // before the long-press timer, and macOS ctrl+click is a left-button press — the
+      // release would toggle the just-selected target off and the menu would turn global.
+      moved = true
       // Android fires contextmenu for the same long press the timer already handled.
       if (Date.now() - menuFiredAt < 800) return
       menuFiredAt = Date.now()

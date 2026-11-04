@@ -1,6 +1,6 @@
 # Frontend — Studio, Runs, Design chat sections
 
-State as of 2026-11-04 (design chat = full-screen canvas over the thread's shared file tree — folders = groups, server-stored layout, see `docs/backend.canvas.md`; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
+State as of 2026-11-05 (design chat = full-screen canvas over the thread's shared file tree — folders = groups, server-stored layout, see `docs/backend.canvas.md`; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
 (see `docs/frontend.md` for stack/router/API-layer/auth). All data fetching goes through
 `src/api/*`; shared UI from `src/components/*`; forms bound via `useDirtyDraft` with
 debounced autosave to `PUT /studio/{kind}/{id}/draft` and `VersionBar` for publishing.
@@ -178,7 +178,9 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   + pan, wheel = pan, ctrl/⌘+wheel (incl. trackpad pinch) = zoom at cursor, Safari `gesture*`
   events prevented. Tap → `onTap({target, additive})`; long press (touch/pen, 450 ms, cancelled
   by >8px movement or a 2nd finger, `vibrate(8)`) or `contextmenu` (right click / Android) →
-  `onMenu`. Targets = nearest `[data-sel]` (`c:<file path>` component, `g:<folder path>` group);
+  `onMenu`; the press that opened the menu never ends as a tap (`contextmenu` also marks it
+  moved — Android can fire it before the timer, macOS ctrl+click is a left press; 2026-11-05).
+  Targets = nearest `[data-sel]` (`c:<file path>` component, `g:<folder path>` group);
   `[data-canvas-ui]` subtrees (group header buttons) keep their own clicks. `rectOf` measures via
   offset chains + `data-dx`/`data-dy` (translate of moved elements; transform/animation-proof);
   `fitRect`, `zoomBy`, `setView` (optional 220 ms transition). Zoom 5%–400%.
@@ -190,7 +192,7 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   virtual folders, outline when selected — widths use `--inv-k`) that extends left / up around
   items moved past the block's edge. Header = folder name (`folderLabel`: last segment + `/`,
   root = "Top level"; full path as tooltip; "new folder" tag when virtual) + "from message N:
-  brief" with a Details button (`firstRun`) + (top groups) the chat agent's reply of that message
+  brief" + (top groups) the chat agent's reply of that message
   (`Reply`: markdown in a rounded block, `line-clamp-4`, tap toggles full text,
   `data-canvas-ui`); `CHROME_ZOOM` (`zoom: min(4, max(1, --inv-k))`) keeps
   it readable zoomed out. Items container (wrap default `max-w-[5400px]`, `row`, `col` per
@@ -198,14 +200,14 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   score), then pending cards, then subfolders (nested `FolderGroup`s). A rAF + ResizeObserver
   layout effect pads the container right/bottom and moves the background left/top around moved
   items (no layout shift). Everything the groups need comes in one memoized `GroupEnv` (selection
-  set, layout, `messageOf`, `onDetails`, `onRetry`, `onStatus`).
+  set, layout, `messageOf`, `onRetry`, `onStatus`).
 - **`PendingCard`** (in FolderGroup.tsx): a run that is running / failed / cancelled / interrupted
   (`statuses[id] ?? listed status` ≠ completed) **or a completed reply-only message** (listed
   `reply`, no file of the run on the canvas) shows as a dashed card `[data-pending=<run>]`
   inside the group of `run.canvas_folder` (virtual folders are created in the tree when it doesn't
   exist yet): message number + brief, "about <file names>" (`run.context_paths`), the reply
   (`Reply`), `RunProgress` while running, error line, Stop / Try again (failed, cancelled,
-  interrupted) / Reconnect / Details, and the latest iteration's html artifacts as drafts
+  interrupted) / Reconnect, and the latest iteration's html artifacts as drafts
   (`useRunLive` + `componentsOf`; gen_components results appear here live; frames without a
   selection key). Completed runs with files show nothing extra — their files are in the tree.
 - **`ComponentFrame`** (`canvas/ComponentFrame.tsx`, `memo`): `id` = artifact id (loaded/cached,
@@ -259,13 +261,15 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   Arrange vertically / horizontally (only when arranging applies), Reset position & size, **Rename
   folder…** (one non-root group: prompt → `moveCanvasPath(folder, parent/name)`),
   **Move to folder…** (components only: prompt with a folder path → one move per file), Delete from
-  canvas, Open preview + Copy HTML (single component), Run details (drawer with `RunDetailView`;
-  component → its `run_id`, group → `firstRun`), Clear selection. On empty canvas: Fit
+  canvas, Open preview + Copy HTML (single component), **Download HTML / Download PNG @2x** (see
+  Downloads), Clear selection. (No run-details drawer /
+  Details buttons on the canvas since 2026-11-05 — agent + tools runs made them obsolete; the
+  full `/runs/:id` page still exists.) On empty canvas: Fit
   everything, Go to latest, New message, Reset layout (when anything is customised).
 - **Selection toolbar** (`canvas/SelectionBar.tsx`): floating icon bar while the selection is
   non-empty. Grip (drag anywhere; double-click = back to the default top-right place), count badge,
   Arrange vertically / horizontally (only when applicable — see Canvas layout), the 4 quick
-  actions, Open preview (single component), Run details (single), Reset position & size, Rename
+  actions, Open preview (single component), Download HTML / PNG @2x, Reset position & size, Rename
   folder / Move to folder (when applicable), Delete from canvas, Clear, vertical ↔ horizontal
   toggle, More (opens the context menu beside it). Fixed
   thickness (46px, 54px on coarse pointers = border + p-1 + button), only the long axis scrolls
@@ -276,6 +280,14 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   **Undo** (6 s) → `restoreCanvasOp(op_id)` (409 when a path is taken again → error toast). The
   server records a note for the next run; nothing is sent with the message (the old client
   `<meta>` mechanism is gone). Rename / Move as above (the server remaps layout keys).
+- **Downloads** (2026-11-05): `exportSelection(format)` → `exportCanvas(thread, paths, 'html'|'png')`
+  (`api/canvas.ts`, `POST /threads/{id}/canvas/export`, `docs/backend.canvas.md` "Export"; paths
+  as for delete — the root group sends its direct files) → `saveFile` (`api/client.ts`: temporary
+  `<a download>`, name from `Content-Disposition` via `apiPostFile`). One selected component →
+  "Download HTML" / "Download PNG @2x" save that file (`tiers.html` / `tiers@2x.png`); groups or
+  several items → the labels say "(zip)" and the server zips. PNG is disabled above
+  `MAX_EXPORT_PNG` (24) components (hint `max 24`); both actions are disabled while one runs
+  (toast "Rendering PNG…" / "Preparing download…", errors as a toast).
 - **Composer** (`canvas/Composer.tsx`, restyled 2026-11-04): floating bottom-center card —
   rounded-3xl pill (`p-1.5`, `focus-within:border-accent/60`), chips row (small rounded-full
   chips), auto-growing textarea at 16px (no iOS focus zoom), Enter sends / Shift+Enter newline
@@ -287,21 +299,22 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   are stable (`retry` via a ref), so typing in the composer doesn't re-render groups and selection /
   layout changes don't re-render frames.
 - Auto-fit "latest": the top group holding the newest running message's card, else the newest file.
-- Smoke (2026-11-04): `node tmp/canvas-smoke/smoke.mjs apps/frontend/dist tmp/canvas-smoke/out` —
+- Smoke (2026-11-05): `node tmp/canvas-smoke/smoke.mjs apps/frontend/dist tmp/canvas-smoke/out` —
   playwright-core (installed in `tmp/canvas-smoke`) drives `/usr/bin/google-chrome` headless as a
   touch tablet (820×1180), serving `dist` and a stubbed `/api/v1` purely through `context.route`
   (no dev server, no backend): runs (each POST → running run `R<n>` with `canvas_folder
-  /new-r<n>`) and a mutable canvas (`GET/PUT /threads/R1/canvas…`, delete/restore/move) with
+  /new-r<n>`) and a mutable canvas (`GET/PUT /threads/R1/canvas…`, delete/restore/move/export) with
   `/pricing/{card-one,card-two}.html` (R1 is an agent-mode run with a reply), nested `/pricing/dark/card-one.html`, `/hero/wide-hero.html`
   and a running run targeting `/hero/taller`. Touch via CDP `Input.dispatchTouchEvent`; prompts
-  answered through `page.on('dialog')`; fit via `Shift+Digit1`. 61 checks: groups = folders incl.
+  answered through `page.on('dialog')`; fit via `Shift+Digit1`. 63 checks: groups = folders incl.
   nested, folder header origin, file labels, pending card in its virtual target folder, frame
   shrink, tap / long-press / select-more, pinch, pan, freezing (card fixtures carry a CSS
   animation + rAF counter `__ticks`: off-screen frozen, settled running, mid-pan frozen, resumes
   after settle), quick action posts `context_paths` + `agent: canvas-chat`, the agent reply in the group header, group →
   folder path, handles (move both ways, background grows, scale), debounced layout PUT with path
   keys, arrange (folder col, groups row), reset, Reset layout, free layout, toolbar, delete → server
-  + undo → restore, nested folder delete, rename folder → move, move to folder → new group, no
+  + undo → restore, nested folder delete, downloads (component → `card-two@2x.png`, group →
+  `hero.zip` with the folder path), rename folder → move, move to folder → new group, no
   `<meta>`, title collapse, new chat, zero console errors.
 
 ### Canvas layout (2026-11-04)

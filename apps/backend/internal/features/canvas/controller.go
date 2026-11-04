@@ -8,6 +8,7 @@ import (
 	"go.uber.org/fx"
 
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/auth"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
@@ -24,13 +25,14 @@ var Module = fx.Options(
 // Controller serves /threads/{id}/canvas* (any authenticated user; owner
 // scoped like runs, admins see all).
 type Controller struct {
-	store *Store
-	mw    *auth.Middleware
+	store    *Store
+	mw       *auth.Middleware
+	renderer render.Renderer // PNG export
 }
 
 // NewController builds the canvas controller.
-func NewController(s *Store, mw *auth.Middleware) *Controller {
-	return &Controller{store: s, mw: mw}
+func NewController(s *Store, mw *auth.Middleware, rd render.Renderer) *Controller {
+	return &Controller{store: s, mw: mw, renderer: rd}
 }
 
 // Routes registers the canvas routes.
@@ -42,6 +44,7 @@ func (c *Controller) Routes(r chi.Router) {
 		r.Post("/threads/{id}/canvas/delete", httpx.Handle(c.delete))
 		r.Post("/threads/{id}/canvas/restore", httpx.Handle(c.restore))
 		r.Post("/threads/{id}/canvas/move", httpx.Handle(c.move))
+		r.Post("/threads/{id}/canvas/export", httpx.Handle(c.export))
 	})
 }
 

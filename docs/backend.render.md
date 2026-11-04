@@ -1,6 +1,6 @@
 # Backend — render (HTML fragment → screenshots + metrics)
 
-State as of 2026-11-01. Package `internal/features/render` (`render.Module`) turns an untrusted
+State as of 2026-11-05 (`content_x` metric added). Package `internal/features/render` (`render.Module`) turns an untrusted
 LLM-generated HTML component fragment into PNG screenshots plus layout/style metrics for the critic
 LLMs (vision critics get the PNGs, text critics the metrics). Companion package
 `internal/features/blobs` (`blobs.Module`) stores the PNGs. Chrome runs **on the production host**,
@@ -75,9 +75,10 @@ disabled, and no `Runtime.evaluate` is ever issued.
 | Metric | Meaning |
 |---|---|
 | `stage` | stage box in viewport coords (x=0) |
-| `root` | component root element (first element child of the stage), **relative to the stage** |
+| `root` | component root element (first element child of the stage), **relative to the stage**; all zeros when that child has no box (a leading `<style>`/`<link>`) |
 | `stage_height` | stage box height (≥ `stage_height`; grows with content) |
-| `content_height` / `content_width` | extents of everything inside the stage, from the stage top-left |
+| `content_height` | bottom of everything inside the stage, from the stage top |
+| `content_width` / `content_x` | width of the union of everything inside the stage and its left edge relative to the stage (negative = escapes left); used by the canvas PNG export crop |
 | `overflow_x` / `overflow_y` | content escapes the stage box (±0.5 px tolerance) |
 | `top_level_elements` | element children of the stage (a valid fragment has 1) |
 | `blocked_requests` | `{url, reason}` — denied by CSP or the request filter (`content-security-policy`, `not-allowlisted`, `scheme-not-allowed`, `port-not-allowed`, `invalid-url`); capped at 50 |

@@ -1,11 +1,12 @@
 # Backend — canvas (shared file tree of a chat thread)
 
-**State as of 2026-11-04.** Package `internal/features/canvas` (`canvas.Module`: models, `NewStore`,
+**State as of 2026-11-05.** Package `internal/features/canvas` (`canvas.Module`: models, `NewStore`,
 controller), models in `internal/models/canvas.go`. The shared state between the user and the
 agents of a chat thread is its **set of component files**: a tree of HTML files (folders = groups)
 over immutable html artifacts. The canvas UI is a view of it plus a view-only layout; agents read
 the same files through a read-only `/canvas` mount. The package must not import `engine` or
-`agentrun` (both depend on it). Deps: `*gorm.DB`, `*blobs.Store`.
+`agentrun` (both depend on it). Deps: `*gorm.DB`, `*blobs.Store`; the controller also takes
+`render.Renderer` (PNG export).
 
 Verify: from `apps/backend`, `go test -race ./internal/features/canvas` (temp-file SQLite).
 
@@ -87,8 +88,34 @@ recomputed on every call: implicit directories, `Stat`/`Read`/`List` per the vfs
 | `POST /threads/{id}/canvas/delete` | `{paths: [...]}` (1–200) → `{op_id, deleted: [...]}` |
 | `POST /threads/{id}/canvas/restore` | `{op_id}` → `{restored: [...]}` |
 | `POST /threads/{id}/canvas/move` | `{from, to}` → `{moved: [{from, to}]}` |
+| `POST /threads/{id}/canvas/export` | `{paths: [...] (1–200), format: html\|png}` → a file download (see Export) |
 
 Content keeps using `GET /artifacts/{id}/content` (engine, sandboxed CSP).
+
+## Export (`export.go`, 2026-11-05)
+
+`POST /threads/{id}/canvas/export` — the selection as downloads (`Content-Disposition: attachment`,
+`Cache-Control: no-store`, `nosniff`; `Content-Disposition` is in the CORS exposed headers).
+
+- Paths go through `Resolve` (folders recursive, unknown → 400 on `paths`). Exactly one `.html`
+  path → that file alone; otherwise (folder, several paths) → a zip whose entries keep the canvas
+  paths without the leading `/` (`pricing/dark/tiers.html`). Zip name: one non-root folder →
+  `<folder>.zip`, else `canvas.zip`. HTML entries deflated, PNGs stored.
+- `html`: a fragment becomes a standalone page (`<!doctype html>`, charset, viewport, `<title>` =
+  file name, fragment as the body — like the canvas frame, which uses it as the whole document);
+  input already starting with `<!doctype`/`<html` passes through. Limit `MaxExportHTML` = 200 files.
+- `png` (`<stem>@2x.png`): rendered by `render.Renderer` with the export variant — width 1280 (the
+  canvas frame width), stage height 40, light, `#ffffff`, DPR 2, max height 4800. Content narrower
+  than 75% of the stage (`Metrics.ContentX/ContentWidth`, the union of everything inside the stage)
+  is cropped to it ± 48 px (min 320 px) and padded 48 px top/bottom in white; wide components keep
+  the full 1280 px. (`Metrics.Root` is not used: it is zero when the fragment starts with
+  `<style>`/`<link>`.) Limit `MaxExportPNG` = 24 files (renders run 2 at a time under the 60 s
+  request timeout). No Chrome / nil renderer → 503, render timeout → 503, invalid → 400.
+- Zip with failures: failed files are skipped and listed in `export-errors.txt`; all failing →
+  the first error. A single file failing → that error.
+- Tests: `export_test.go` with a fake renderer (single html page / passthrough, folder zip
+  entries + name, `canvas.zip`, PNG crop math and 2× size, wide uncropped, failure listing,
+  validation, other user 404, no renderer 503, PNG limit before any render).
 
 ## Engine side (summary — details in `docs/backend.engine.md`)
 

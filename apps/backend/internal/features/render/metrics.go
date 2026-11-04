@@ -19,10 +19,12 @@ type Metrics struct {
 	Root Box `json:"root"`
 	// StageHeight is the stage box height in CSS px (>= variant StageHeight).
 	StageHeight int `json:"stage_height"`
-	// ContentHeight/ContentWidth are the extents of everything inside the
-	// stage, relative to the stage top-left corner.
+	// ContentHeight is the bottom of everything inside the stage, relative to
+	// the stage top; ContentWidth the width of its union, starting ContentX px
+	// from the stage left edge (negative when content escapes to the left).
 	ContentHeight int `json:"content_height"`
 	ContentWidth  int `json:"content_width"`
+	ContentX      int `json:"content_x"`
 	// OverflowX/OverflowY report content escaping the stage box.
 	OverflowX bool `json:"overflow_x"`
 	OverflowY bool `json:"overflow_y"`
@@ -173,6 +175,7 @@ func computeMetrics(res *domsnapshot.CaptureSnapshotResult, v Variant, f *reques
 	contentHeight := 0.0
 	if hasUnion {
 		m.ContentWidth = round(union.w)
+		m.ContentX = round(union.x - stageB.x)
 		contentHeight = math.Max(0, union.y+union.h-stageB.y)
 		m.ContentHeight = round(contentHeight)
 		m.OverflowX = union.x < stageB.x-0.5 || union.x+union.w > stageB.x+stageB.w+0.5

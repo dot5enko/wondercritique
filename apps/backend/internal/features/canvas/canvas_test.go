@@ -404,7 +404,7 @@ func TestAccessAndHTTP(t *testing.T) {
 		return "Bearer " + tok
 	}
 	r := chi.NewRouter()
-	NewController(h.s, mw).Routes(r)
+	NewController(h.s, mw, nil).Routes(r)
 	do := func(method, path, body, tok string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Authorization", tok)

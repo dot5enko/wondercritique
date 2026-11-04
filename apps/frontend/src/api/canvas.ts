@@ -8,7 +8,7 @@
  * the server; user operations (delete / restore / move) become notes the next
  * run of the thread is told about.
  */
-import { apiGet, apiPost, apiPut } from './client'
+import { apiGet, apiPost, apiPostFile, apiPut, type DownloadedFile } from './client'
 
 /** One component file of the canvas. */
 export interface CanvasFile {
@@ -80,6 +80,19 @@ export function restoreCanvasOp(thread: string, opId: string): Promise<{ restore
 /** POST …/move — file → file or folder → folder (rename = move; the target is slugged server-side). */
 export function moveCanvasPath(thread: string, from: string, to: string): Promise<{ moved: { from: string; to: string }[] }> {
   return apiPost<{ moved: { from: string; to: string }[] }>(`${base(thread)}/move`, { from, to })
+}
+
+export type CanvasExportFormat = 'html' | 'png'
+
+/** Most components one PNG export may cover (screenshots are rendered server-side). */
+export const MAX_EXPORT_PNG = 24
+
+/**
+ * POST …/export — one file path → that file (`.html` page or `@2x.png`);
+ * folders or several paths → a zip at the canvas paths.
+ */
+export function exportCanvas(thread: string, paths: string[], format: CanvasExportFormat): Promise<DownloadedFile> {
+  return apiPostFile(`${base(thread)}/export`, { paths, format })
 }
 
 /* ---------- path helpers ---------- */

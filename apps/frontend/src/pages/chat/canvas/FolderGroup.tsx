@@ -13,7 +13,7 @@
  * absolutely positioned — `free`); nested blocks move inside their parent.
  */
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Ban, ListTree, RotateCw } from 'lucide-react'
+import { Ban, RotateCw } from 'lucide-react'
 import { Button, cx } from '../../../ui'
 import { Markdown } from '../../../components'
 import { baseOf, type CanvasFile } from '../../../api/canvas'
@@ -44,7 +44,6 @@ export interface GroupEnv {
   layout: CanvasLayout
   /** message number + brief (+ the chat agent's reply) of a run of the chat. */
   messageOf: (runId: string) => { index: number; brief: string; reply: string } | null
-  onDetails: (runId: string) => void
   onRetry: (run: Run) => void
   onStatus: (runId: string, status: RunStatus) => void
 }
@@ -153,16 +152,9 @@ export const FolderGroup = memo(function FolderGroup({
           {node.virtual && <span className="shrink-0 text-xs text-ink-3">new folder</span>}
         </div>
         {origin && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3">
-            <span className="min-w-0 truncate" style={{ maxWidth: '60ch' }}>
-              from message {origin.index}: {origin.brief}
-            </span>
-            <span data-canvas-ui>
-              <Button size="sm" variant="ghost" icon={<ListTree />} onClick={() => env.onDetails(node.firstRun)}>
-                Details
-              </Button>
-            </span>
-          </div>
+          <p className="min-w-0 truncate text-xs text-ink-3" style={{ maxWidth: '60ch' }}>
+            from message {origin.index}: {origin.brief}
+          </p>
         )}
         {top && origin?.reply && <Reply text={origin.reply} />}
       </header>
@@ -283,9 +275,6 @@ const PendingCard = memo(function PendingCard({ runId, env }: { runId: string; e
               Reconnect
             </Button>
           )}
-          <Button size="sm" variant="ghost" icon={<ListTree />} onClick={() => env.onDetails(runId)}>
-            Details
-          </Button>
         </div>
       </header>
       {drafts.length > 0 ? (

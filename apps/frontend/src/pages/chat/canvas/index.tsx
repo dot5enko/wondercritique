@@ -21,10 +21,11 @@ import {
   ArrowLeft,
   Columns3,
   Copy,
+  FileDown,
   FolderInput,
   FolderPen,
+  ImageDown,
   ListChecks,
-  ListTree,
   Maximize,
   Maximize2,
   Minus,
@@ -55,13 +56,16 @@ import {
   baseOf,
   deleteCanvasPaths,
   dirOf,
+  exportCanvas,
   getCanvas,
   joinPath,
   moveCanvasPath,
+  MAX_EXPORT_PNG,
   restoreCanvasOp,
+  type CanvasExportFormat,
   type CanvasFile,
 } from '../../../api/canvas'
-import { RunDetailView } from '../../runs/detail'
+import { saveFile } from '../../../api/client'
 import { useThreads } from '../threads'
 import { useViewport, type HandleInfo, type MenuInfo, type TapInfo } from './useViewport'
 import { FolderGroup, type GroupEnv } from './FolderGroup'
@@ -271,13 +275,6 @@ export default function CanvasPage() {
     return [...out.values()]
   }, [tree, folders, fileByPath])
 
-  /** The message a key's content comes from (Run details). */
-  const runOfKey = useCallback((key: string): string | null => {
-    const p = key.slice(2)
-    if (key.startsWith('c:')) return fileByPath.get(p)?.run_id ?? null
-    return folders.get(p)?.firstRun || null
-  }, [fileByPath, folders])
-
   const chips: ContextChip[] = selection.map((k) => ({
     key: k,
     label: k.startsWith('g:') ? folderLabel(k.slice(2)) : baseOf(k.slice(2)),
@@ -485,9 +482,9 @@ export default function CanvasPage() {
 
   /* ---------- misc state ---------- */
 
-  const [detailsRunId, setDetailsRunId] = useState<string | null>(null)
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null)
+  const [exporting, setExporting] = useState(false)
   useEffect(() => {
     if (!notice) return
     const t = window.setTimeout(() => setNotice(null), notice.undo ? 6000 : 2400)
@@ -699,6 +696,21 @@ export default function CanvasPage() {
     }, "Couldn't move")
   }
 
+  /** Downloads the selection: one component → its file, groups / several → a zip built server-side. */
+  const exportSelection = (format: CanvasExportFormat): void => {
+    const paths = selection.flatMap(pathsOf)
+    if (!threadId || paths.length === 0 || exporting) return
+    const fallback = paths.length === 1 && selection[0].startsWith('c:') ? baseOf(paths[0]).replace(/\.html$/, format === 'png' ? '@2x.png' : '.html') : 'canvas.zip'
+    setExporting(true)
+    setNotice({ text: format === 'png' ? 'Rendering PNG…' : 'Preparing download…' })
+    exportCanvas(threadId, paths, format)
+      .then(({ blob, filename }) => {
+        saveFile(blob, filename ?? fallback)
+        setNotice(null)
+      }, (err: unknown) => setNotice({ text: errorText(err, "Couldn't download") }))
+      .finally(() => setExporting(false))
+  }
+
   // The title shrinks to just the back arrow after a moment (hover shows it again).
   const [titleShort, setTitleShort] = useState(false)
   useEffect(() => {
@@ -710,7 +722,7 @@ export default function CanvasPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const typing = e.target instanceof HTMLElement && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')
-      if (e.key === 'Escape' && !menu && !previewPath && !detailsRunId) {
+      if (e.key === 'Escape' && !menu && !previewPath) {
         setSelection([])
         setSelectMode(false)
       }
@@ -723,7 +735,7 @@ export default function CanvasPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [menu, previewPath, detailsRunId, zoomBy, fitAll])
+  }, [menu, previewPath, zoomBy, fitAll])
 
   /* ---------- context menu ---------- */
 
@@ -753,9 +765,21 @@ export default function CanvasPage() {
     onSelect: () => sendWithSelection(a.prompt(ids.length > 1)),
   }))
   const clearAction: MenuAction = { key: 'clear', label: 'Clear selection', icon: X, onSelect: clearSelection }
+  // A single component downloads as itself; groups and multi-selections as a zip.
+  const zipped = !single
+  const downloadActions: MenuAction[] = ids.length === 0 ? [] : [
+    { key: 'download-html', label: zipped ? 'Download HTML (zip)' : 'Download HTML', icon: FileDown, disabled: exporting, onSelect: () => exportSelection('html') },
+    {
+      key: 'download-png',
+      label: zipped ? 'Download PNG @2x (zip)' : 'Download PNG @2x',
+      icon: ImageDown,
+      hint: ids.length > MAX_EXPORT_PNG ? `max ${MAX_EXPORT_PNG}` : undefined,
+      disabled: exporting || ids.length > MAX_EXPORT_PNG,
+      onSelect: () => exportSelection('png'),
+    },
+  ]
 
   const menuGroups = (): MenuAction[][] => {
-    const runId = selection.length === 1 ? runOfKey(selection[0]) : menu?.target ? runOfKey(menu.target) : null
     if (selection.length === 0) {
       return [[
         { key: 'fit', label: 'Fit everything', icon: Maximize, onSelect: () => { autoFit.current = false; fitAll() } },
@@ -790,20 +814,19 @@ export default function CanvasPage() {
               },
             ]
           : []),
-        ...(runId ? [{ key: 'details', label: 'Run details', icon: ListTree, onSelect: () => setDetailsRunId(runId) }] : []),
+        ...downloadActions,
         clearAction,
       ],
     ]
   }
 
   /** The fixed toolbar: layout first, then the canned requests, then single-item actions. */
-  const barRunId = selection.length === 1 ? runOfKey(selection[0]) : null
   const barGroups: MenuAction[][] = [
     arrangeActions,
     quickActions,
     [
       ...(single ? [{ key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewPath(single.path) }] : []),
-      ...(barRunId ? [{ key: 'details', label: 'Run details', icon: ListTree, onSelect: () => setDetailsRunId(barRunId) }] : []),
+      ...downloadActions,
       resetAction,
       ...fileActions,
       deleteAction,
@@ -820,7 +843,7 @@ export default function CanvasPage() {
   /* ---------- render ---------- */
 
   const env = useMemo<GroupEnv>(() => ({
-    selection: selected, layout, messageOf, onDetails: setDetailsRunId, onRetry: retry, onStatus,
+    selection: selected, layout, messageOf, onRetry: retry, onStatus,
   }), [selected, layout, messageOf, retry, onStatus])
 
   const empty = !threadId && runs.length === 0
@@ -991,12 +1014,6 @@ export default function CanvasPage() {
         label={previewPath ? baseOf(previewPath) : ''}
         onClose={() => setPreviewPath(null)}
       />
-
-      {detailsRunId && (
-        <Drawer onClose={() => setDetailsRunId(null)}>
-          <RunDetailView runId={detailsRunId} />
-        </Drawer>
-      )}
     </div>
   )
 }
@@ -1022,27 +1039,5 @@ function PreviewModal({ id, label, onClose }: { id: string | null; label: string
         <div className="h-[70vh] w-full animate-pulse rounded-lg bg-app" />
       )}
     </Modal>
-  )
-}
-
-/** Right-side drawer with the full run detail view. */
-function Drawer({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-  return (
-    <>
-      <button type="button" aria-label="Close details" onClick={onClose} className="fixed inset-0 z-40 cursor-default bg-black/20" />
-      <aside className="fixed inset-y-0 right-0 z-50 flex w-[min(960px,100vw)] flex-col border-l border-line bg-page shadow-xl select-text">
-        <div className="flex items-center justify-end border-b border-line bg-surface px-2 py-1.5">
-          <IconButton icon={<X />} label="Close details" size="sm" onClick={onClose} />
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
-      </aside>
-    </>
   )
 }
