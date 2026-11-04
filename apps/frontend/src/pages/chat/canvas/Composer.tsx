@@ -49,27 +49,27 @@ export function Composer({
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-      <div className="pointer-events-auto flex w-full max-w-[680px] flex-col gap-2 rounded-2xl border border-line-strong bg-surface/95 p-2 shadow-pop backdrop-blur">
+      <div className="pointer-events-auto flex w-full max-w-[680px] flex-col gap-1 rounded-3xl border border-line-strong bg-surface/95 p-1.5 shadow-pop backdrop-blur transition-colors focus-within:border-accent/60">
         {selectMode && (
-          <div className="flex items-center gap-2 rounded-lg bg-accent-soft px-2.5 py-1.5 text-xs text-accent-ink">
+          <div className="flex items-center gap-2 rounded-full bg-accent-soft py-1 pr-1 pl-3 text-xs text-accent-ink">
             <span className="min-w-0 flex-1">Tap components or groups to add them to the message.</span>
-            <Button size="sm" variant="primary" onClick={onDoneSelecting}>
+            <Button size="sm" variant="primary" className="rounded-full" onClick={onDoneSelecting}>
               Done
             </Button>
           </div>
         )}
         {chips.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 px-1 pt-0.5">
+          <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1">
             {chips.map((c) => (
-              <span key={c.key} className="inline-flex h-7 items-center gap-1 rounded-full bg-accent-soft pr-1 pl-2.5 text-xs font-medium text-accent-ink">
+              <span key={c.key} className="inline-flex h-6 items-center gap-1 rounded-full bg-accent-soft pr-1 pl-2.5 text-xs font-medium text-accent-ink">
                 {c.label}
                 <button
                   type="button"
                   aria-label={`Remove ${c.label}`}
                   onClick={() => onRemoveChip(c.key)}
-                  className="grid size-5 cursor-pointer place-items-center rounded-full outline-none hover:bg-accent/15 focus-visible:ring-2 focus-visible:ring-accent/40"
+                  className="grid size-4 cursor-pointer place-items-center rounded-full outline-none hover:bg-accent/15 focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
-                  <X size={12} />
+                  <X size={11} />
                 </button>
               </span>
             ))}
@@ -80,8 +80,8 @@ export function Composer({
             )}
           </div>
         )}
-        {error && <p className="px-2 text-xs text-danger">{error}</p>}
-        <div className="flex items-end gap-2">
+        {error && <p className="px-3 text-xs text-danger">{error}</p>}
+        <div className="flex items-end gap-1.5">
           <textarea
             ref={inputRef}
             rows={1}
@@ -95,14 +95,14 @@ export function Composer({
             }}
             placeholder={placeholder}
             className={cx(
-              'max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-[16px] leading-6 text-ink outline-none placeholder:text-ink-3',
+              'max-h-40 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-3 py-1.5 text-[16px] leading-6 text-ink outline-none placeholder:text-ink-3',
             )}
           />
           <Button
             variant="primary"
             size="lg"
             icon={<ArrowUp />}
-            className="shrink-0 rounded-xl"
+            className="shrink-0 rounded-full"
             loading={sending}
             disabled={!value.trim()}
             onClick={onSend}

@@ -14,13 +14,16 @@
  * Performance: an iframe is only created once its frame comes near the screen
  * (IntersectionObserver — it sees the canvas transform), and at most
  * `BOOT_CONCURRENCY` documents parse/lay out at the same time, so a chat full
- * of heavy hero sections doesn't block the main thread all at once.
+ * of heavy hero sections doesn't block the main thread all at once. Mounted
+ * documents are frozen (animations, videos, rAF loops paused) while the canvas
+ * moves, while off screen and when zoomed out below `LIVE_MIN_ZOOM`, so a big
+ * canvas isn't re-painting dozens of animations every frame.
  *
  * Handles (shown on hover and while selected): a pill on the top edge moves the
  * component inside its group, the bottom-right grip resizes it — both are
  * `data-handle` targets the canvas viewport turns into drags.
  */
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchArtifact } from '../../../api/runs'
 import { cx } from '../../../ui'
 import type { Point } from './layout'
@@ -68,6 +71,27 @@ function acquireBoot(start: () => void): () => void {
   }
 }
 
+/* ---------- freezing: live documents stand still unless worth watching ---------- */
+
+/** Below this canvas zoom components are too small for their animations to matter. */
+const LIVE_MIN_ZOOM = 0.2
+let canvasMoving = false
+let canvasZoom = 1
+/** Mounted frames' sync functions (re-evaluate + post their freeze state). */
+const liveFrames = new Set<() => void>()
+
+/**
+ * The canvas view started / stopped moving (`useViewport` `onMotion`). While it
+ * moves every document is frozen; settled, only the ones on screen at a
+ * readable zoom run.
+ */
+export function setCanvasMotion(moving: boolean, zoom: number): void {
+  if (moving === canvasMoving && zoom === canvasZoom) return
+  canvasMoving = moving
+  canvasZoom = zoom
+  liveFrames.forEach((sync) => sync())
+}
+
 /* ---------- html cache (artifacts are immutable) ---------- */
 
 const htmlCache = new Map<string, Promise<string>>()
@@ -109,9 +133,31 @@ export function useComponentHtml(id: string): { html: string | null; error: unkn
 // it once. Measures on load, on body resizes and a few times after (fonts,
 // images, frames laid out late while off-screen) — at most once per frame, and
 // only posts when the size changed.
+//
+// Freezing ({__wcFreeze: 1|0} from the parent): pauses the running CSS / Web
+// animations and transitions, videos and requestAnimationFrame loops (callbacks
+// are held and handed back on thaw), so a frozen document produces no new
+// frames — while the canvas moves the compositor only moves bitmaps it already
+// has. Measuring keeps the native rAF (off-screen frames still size the layout).
 const MEASURE_SCRIPT = `<script>(function(){
+var raf=window.requestAnimationFrame.bind(window),caf=window.cancelAnimationFrame.bind(window);
+var frozen=false,held={},hid=0,anims=[],vids=[];
+window.requestAnimationFrame=function(cb){if(!frozen)return raf(cb);held[--hid]=cb;return hid};
+window.cancelAnimationFrame=function(id){if(id<0)delete held[id];else caf(id)};
+function freeze(on){
+  if(on===frozen)return;frozen=on;
+  if(on){
+    if(document.getAnimations)document.getAnimations().forEach(function(a){if(a.playState==='running'){a.pause();anims.push(a)}});
+    document.querySelectorAll('video').forEach(function(v){if(!v.paused){v.pause();vids.push(v)}});
+    return;
+  }
+  anims.forEach(function(a){try{a.play()}catch(e){}});anims=[];
+  vids.forEach(function(v){var p=v.play();if(p&&p.catch)p.catch(function(){})});vids=[];
+  var h=held;held={};Object.keys(h).forEach(function(k){raf(h[k])});
+}
+addEventListener('message',function(e){var d=e.data;if(e.source===parent&&d&&d.__wcFreeze!==undefined)freeze(!!d.__wcFreeze)});
 var pending=0,lw=-1,lh=-1;
-function size(){if(!pending)pending=requestAnimationFrame(measure)}
+function size(){if(!pending)pending=raf(measure)}
 function measure(){
   pending=0;
   var d=document.documentElement,b=document.body;if(!b)return;
@@ -182,19 +228,46 @@ export const ComponentFrame = memo(function ComponentFrame({
   const [near, setNear] = useState(false)
   const [mounted, setMounted] = useState(false)
   const releaseRef = useRef<(() => void) | null>(null)
+  // Frozen unless on screen, the canvas still and zoomed in enough (see setCanvasMotion).
+  const onScreen = useRef(true)
+  const frozen = useRef(false) // what the document was last told
+  const sync = useCallback((): void => {
+    const win = ref.current?.contentWindow
+    if (!win) return
+    const next = canvasMoving || !onScreen.current || canvasZoom < LIVE_MIN_ZOOM
+    if (next === frozen.current) return
+    frozen.current = next
+    win.postMessage({ __wcFreeze: next ? 1 : 0 }, '*')
+  }, [])
+  useEffect(() => {
+    liveFrames.add(sync)
+    return () => {
+      liveFrames.delete(sync)
+    }
+  }, [sync])
   useEffect(() => {
     const el = rootRef.current
-    if (!el || near) return
+    if (!el) return
     if (typeof IntersectionObserver === 'undefined') {
       setNear(true)
       return
     }
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) setNear(true)
+    const nearIo = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return
+      setNear(true)
+      nearIo.disconnect()
     }, { rootMargin: '50%' })
-    io.observe(el)
-    return () => io.disconnect()
-  }, [near])
+    const screenIo = new IntersectionObserver((entries) => {
+      onScreen.current = entries[entries.length - 1].isIntersecting
+      sync()
+    }, { rootMargin: '10%' })
+    nearIo.observe(el)
+    screenIo.observe(el)
+    return () => {
+      nearIo.disconnect()
+      screenIo.disconnect()
+    }
+  }, [sync])
   useEffect(() => {
     if (!near || doc == null) return
     let timer = 0
@@ -215,6 +288,7 @@ export const ComponentFrame = memo(function ComponentFrame({
       const d = e.data as { __wcFrame?: number; w?: number; h?: number } | null
       if (!d || d.__wcFrame !== 1) return
       releaseRef.current?.()
+      sync() // the document's script is listening now
       setSize((prev) => {
         // shrink once, from the full render width; later reports only move the height
         const w = prev.w === FRAME_WIDTH && typeof d.w === 'number' && d.w > 0 ? Math.max(MIN_WIDTH, Math.min(FRAME_WIDTH, d.w)) : prev.w
@@ -224,7 +298,7 @@ export const ComponentFrame = memo(function ComponentFrame({
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [])
+  }, [sync])
 
   return (
     <div
@@ -267,6 +341,11 @@ export const ComponentFrame = memo(function ComponentFrame({
                 title={`Component ${label}`}
                 srcDoc={doc}
                 sandbox="allow-scripts"
+                onLoad={() => {
+                  // a (re)loaded document starts unfrozen
+                  frozen.current = false
+                  sync()
+                }}
                 className="pointer-events-none block h-full w-full border-0 bg-white"
                 tabIndex={-1}
               />

@@ -167,7 +167,9 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   pan (`x % 24`); `onView` callback per change. While moving, the world has `will-change: transform` (composite only);
   **settle** (140 ms after the last change, 260 ms after an animated one) drops it so iframes
   re-raster crisply, and only then updates `--inv-k` (1/k, rounded) — it restyles/relayouts the
-  zoom-independent chrome, so never per frame. One handler owns every pointer on the viewport
+  zoom-independent chrome, so never per frame. `onMotion(moving, view)`: `true` once when a
+  motion starts, `false` at every settle (the page forwards it to `setCanvasMotion`, see
+  ComponentFrame "Freezing"). One handler owns every pointer on the viewport
   (`touch-none`): first pointer down on a `[data-handle="move"|"resize"]` → `onHandle({kind,
   target (nearest data-sel), phase start|move|end|cancel, dx, dy})` (world units; extra fingers
   ignored meanwhile); otherwise 1-pointer drag = pan, 2 pointers = pinch zoom around the midpoint
@@ -218,6 +220,18 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
     `rootMargin 50%`; sees the canvas transform) reports the frame near the screen, then through a
     module-level boot queue (`BOOT_CONCURRENCY = 2`; slot freed on the first size report or after
     1.5 s), so many heavy hero blocks don't parse/lay out at once. Mounted frames stay mounted.
+  - **Freezing** (2026-11-04): a cross-origin iframe can't be snapshotted to a bitmap client-side,
+    so instead live documents stop producing frames when they aren't worth watching — then the
+    compositor only moves tiles it already has. Frozen = canvas moving (module-level
+    `setCanvasMotion(moving, k)` from `useViewport` `onMotion`) **or** off screen (a second,
+    permanent IntersectionObserver, `rootMargin 10%`) **or** zoom < `LIVE_MIN_ZOOM` (0.2). Each
+    mounted frame registers a `sync` in `liveFrames` that posts `{__wcFreeze: 1|0}` only on change
+    (re-sent on iframe `load` and on every size report). The injected script (same `<script>` as
+    the measurer) on freeze pauses `document.getAnimations()` that are running (CSS animations /
+    transitions / WAAPI) and playing `<video>`s, and holds `requestAnimationFrame` callbacks
+    (wrapped global rAF / cAF, negative ids while frozen); thaw replays all of them. Measuring uses
+    the native rAF so off-screen frames still size the layout. Not covered: `setInterval` /
+    `setTimeout` driven updates.
   - Handles (`FrameHandles`, also used by groups): pill straddling the top edge (move) and grip in
     the bottom-right corner (resize = **uniform scale** of the whole component, components only), `CHROME_ZOOM`-sized, visible while the
     element itself is selected (a selected group doesn't show its components' handles) and on
@@ -256,8 +270,10 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   **Undo** (6 s) → `restoreCanvasOp(op_id)` (409 when a path is taken again → error toast). The
   server records a note for the next run; nothing is sent with the message (the old client
   `<meta>` mechanism is gone). Rename / Move as above (the server remaps layout keys).
-- **Composer** (`canvas/Composer.tsx`): floating bottom-center card, chips row, auto-growing textarea
-  at 16px (no iOS focus zoom), Enter sends / Shift+Enter newline (IME-safe), Send button.
+- **Composer** (`canvas/Composer.tsx`, restyled 2026-11-04): floating bottom-center card —
+  rounded-3xl pill (`p-1.5`, `focus-within:border-accent/60`), chips row (small rounded-full
+  chips), auto-growing textarea at 16px (no iOS focus zoom), Enter sends / Shift+Enter newline
+  (IME-safe), circular rounded-full primary Send button (36px, ArrowUp).
 - Render cost: `FolderGroup`/`PendingCard`/`ComponentFrame` are memoized and the page's callbacks
   are stable (`retry` via a ref), so typing in the composer doesn't re-render groups and selection /
   layout changes don't re-render frames.
@@ -269,9 +285,11 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   /new-r<n>`) and a mutable canvas (`GET/PUT /threads/R1/canvas…`, delete/restore/move) with
   `/pricing/{card-one,card-two}.html`, nested `/pricing/dark/card-one.html`, `/hero/wide-hero.html`
   and a running run targeting `/hero/taller`. Touch via CDP `Input.dispatchTouchEvent`; prompts
-  answered through `page.on('dialog')`; fit via `Shift+Digit1`. 56 checks: groups = folders incl.
+  answered through `page.on('dialog')`; fit via `Shift+Digit1`. 60 checks: groups = folders incl.
   nested, folder header origin, file labels, pending card in its virtual target folder, frame
-  shrink, tap / long-press / select-more, pinch, pan, quick action posts `context_paths`, group →
+  shrink, tap / long-press / select-more, pinch, pan, freezing (card fixtures carry a CSS
+  animation + rAF counter `__ticks`: off-screen frozen, settled running, mid-pan frozen, resumes
+  after settle), quick action posts `context_paths`, group →
   folder path, handles (move both ways, background grows, scale), debounced layout PUT with path
   keys, arrange (folder col, groups row), reset, Reset layout, free layout, toolbar, delete → server
   + undo → restore, nested folder delete, rename folder → move, move to folder → new group, no

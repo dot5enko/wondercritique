@@ -72,7 +72,7 @@ import { buildTree, filesBelow, folderLabel, indexFolders, topGroups, type Folde
 import { ContextMenu, type MenuAction } from './ContextMenu'
 import { SelectionBar } from './SelectionBar'
 import { Composer, type ContextChip } from './Composer'
-import { loadComponentHtml, useComponentHtml } from './ComponentFrame'
+import { loadComponentHtml, setCanvasMotion, useComponentHtml } from './ComponentFrame'
 import { hasArrangement, MAX_SCALE, MIN_SCALE, useCanvasLayout, type GroupDir, type Point } from './layout'
 
 const EXAMPLES = [
@@ -425,6 +425,7 @@ export default function CanvasPage() {
     onInteract: () => {
       autoFit.current = false
     },
+    onMotion: (moving, { k }) => setCanvasMotion(moving, k),
   })
   const { fitRect, rectOf, zoomBy, setView, view } = vp
 

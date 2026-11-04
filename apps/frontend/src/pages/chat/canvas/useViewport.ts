@@ -8,7 +8,9 @@
  * so frames are only composited; ~140 ms after it stops ("settle") the layer is
  * dropped (iframes re-raster crisply at the new scale) and `--inv-k` (1/k, used
  * by the zoom-independent chrome) is updated — never per frame, since it
- * restyles and re-lays out the whole world.
+ * restyles and re-lays out the whole world. `onMotion` reports the start of a
+ * motion and the settle (the page freezes the live component documents in
+ * between, so the compositor only moves bitmaps it already has).
  *
  * Gestures (all on the viewport element; the hook owns every pointer):
  *  - one pointer drag → pan (touch, pen and mouse)
@@ -78,15 +80,20 @@ export function useViewport(
     onView?: (view: View) => void
     /** Any user pan/zoom (the page stops auto-fitting after it). */
     onInteract?: () => void
+    /** The view started moving (`true`, once per motion) / settled (`false`, with the final view). */
+    onMotion?: (moving: boolean, view: View) => void
   },
 ) {
   const view = useRef<View>({ x: 0, y: 0, k: 1 })
   const settleTimer = useRef(0)
+  const moving = useRef(false)
   const h = useRef(handlers)
   h.current = handlers
 
   const settle = useCallback((): void => {
     settleTimer.current = 0
+    moving.current = false
+    h.current.onMotion?.(false, view.current)
     const world = worldRef.current
     if (!world) return
     world.style.willChange = ''
@@ -102,6 +109,10 @@ export function useViewport(
     // Composite-only while moving; settle() drops the layer so the iframes
     // re-raster at the final scale instead of staying a stretched bitmap.
     if (!immediate) world.style.willChange = 'transform'
+    if (!immediate && !moving.current) {
+      moving.current = true
+      h.current.onMotion?.(true, view.current)
+    }
     world.style.transform = `translate(${x}px, ${y}px) scale(${k})`
     // The dotted background is just texture: constant dot size and spacing at
     // any zoom, it only slides with the pan (so moving still feels anchored).
