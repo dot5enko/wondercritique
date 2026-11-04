@@ -12,8 +12,10 @@ Verify: from `apps/backend`, `go test -race ./internal/features/canvas` (temp-fi
 ## Decisions
 
 - Group = folder, per thread; folders nest. A component = one `.html` file.
-- **Files are never modified in place**: a change is a new file in a new subfolder next to it
-  (`/pricing/tiers.html` → "make it dark" → `/pricing/dark/tiers.html`); variants are new files too.
+- **Files are never modified in place**, and every run's result is isolated in a **new top-level
+  folder** (its own group, no parent): `/pricing/tiers.html` → "make it dark" → `/dark/tiers.html`
+  (`/dark-2` when taken); variants are new files too. Agents can only name that group (since
+  2026-11-04; before, changes went into a subfolder next to the source).
 - Layout (positions, scale, flow) is stored server-side per thread; agents never see it.
 - Old threads (before 2026-11-04) were not migrated: they simply have an empty canvas.
 - User operations (delete, restore, move/rename) become **notes** handed to the **next** run of
@@ -44,7 +46,10 @@ Verify: from `apps/backend`, `go test -race ./internal/features/canvas` (temp-fi
 - `Slug(s)`: NFKD + drop combining marks (é → e), lowercase, non-alnum → `-`, collapsed, ≤ 48
   chars, fallback `design`. `BriefSlug(brief)`: same, stop words dropped ("make it dark" → `dark`,
   "Give me 5 buttons" → `5-buttons`), first 4 words.
-- Uniqueness: `uniqueFile` appends `-2`, `-3`, … to the stem, `uniqueFolder` to the last segment.
+- `TopFolder(hint)`: flattens a loose folder into one top-level folder (`"Pricing/Dark"` →
+  `/pricing-dark`, "" when empty) — used for agent destination hints.
+- Uniqueness: `uniqueFile` appends `-2`, `-3`, … to the stem, `UniqueFolder` (exported, the engine
+  reserves run folders with it) to the last segment.
 
 ## Store (`store.go`)
 

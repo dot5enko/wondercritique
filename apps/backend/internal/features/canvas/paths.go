@@ -212,9 +212,24 @@ func uniqueFile(p string, taken func(string) bool) string {
 	}
 }
 
-// uniqueFolder returns f, or f with "-2", "-3", … appended to its last segment
+// TopFolder flattens a loosely written folder ("Pricing/Dark") into one
+// top-level folder ("/pricing-dark"); "" when nothing usable is left.
+func TopFolder(p string) string {
+	var segs []string
+	for _, s := range strings.Split(p, "/") {
+		if strings.TrimSpace(s) != "" {
+			segs = append(segs, s)
+		}
+	}
+	if len(segs) == 0 {
+		return ""
+	}
+	return "/" + Slug(strings.Join(segs, " "))
+}
+
+// UniqueFolder returns f, or f with "-2", "-3", … appended to its last segment
 // when taken.
-func uniqueFolder(f string, taken func(string) bool) string {
+func UniqueFolder(f string, taken func(string) bool) string {
 	if f == "/" || !taken(f) {
 		return f
 	}

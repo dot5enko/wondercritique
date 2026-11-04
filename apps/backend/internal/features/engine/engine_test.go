@@ -716,7 +716,7 @@ func TestSelectedComponentsSeedAndPlaceTheResult(t *testing.T) {
 	}
 	h.waitDone(second)
 	fb := h.lastFeedback()
-	for _, want := range []string{"### Selected components", "#### /login-form/login-form.html", "design 1", `"/login-form/dark"`} {
+	for _, want := range []string{"### Selected components", "#### /login-form/login-form.html", "design 1", `new top-level folder "/dark"`} {
 		if !strings.Contains(fb, want) {
 			t.Errorf("selection seed lacks %q:\n%s", want, fb)
 		}
@@ -728,13 +728,13 @@ func TestSelectedComponentsSeedAndPlaceTheResult(t *testing.T) {
 	if len(d.ContextPaths) != 1 || d.ContextPaths[0] != "/login-form/login-form.html" {
 		t.Errorf("context paths = %v", d.ContextPaths)
 	}
-	// A new version keeps the file name, in a subfolder, linked to its source.
-	if len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != "/login-form/dark/login-form.html" {
+	// A new version keeps the file name, in a new top-level group, linked to its source.
+	if len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != "/dark/login-form.html" || d.CanvasFolder != "/dark" {
 		t.Fatalf("canvas paths = %v", d.CanvasPaths)
 	}
 	files, _ := h.e.Canvas.Files(context.Background(), first)
 	for _, f := range files {
-		if f.Path == "/login-form/dark/login-form.html" && f.SourcePath != "/login-form/login-form.html" {
+		if f.Path == "/dark/login-form.html" && f.SourcePath != "/login-form/login-form.html" {
 			t.Errorf("source path = %q", f.SourcePath)
 		}
 	}
@@ -788,7 +788,7 @@ func TestAgentDestinationHintsWin(t *testing.T) {
 	}
 	id, _ := h.start(h.user, `{"thread_id":"`+first+`","input":{"brief":"dark"}}`)
 	h.waitDone(id)
-	if d := h.detail(id); len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != "/pricing/dark/tiers-card.html" || d.CanvasFolder != "/pricing/dark" {
+	if d := h.detail(id); len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != "/pricing-dark/tiers-card.html" || d.CanvasFolder != "/pricing-dark" {
 		t.Errorf("hinted = %q %v", d.CanvasFolder, d.CanvasPaths)
 	}
 	id, _ = h.start(h.user, `{"thread_id":"`+first+`","input":{"brief":"three buttons"}}`)
@@ -796,6 +796,47 @@ func TestAgentDestinationHintsWin(t *testing.T) {
 	want := []string{"/three-buttons/one.html", "/three-buttons/three-buttons-2.html", "/three-buttons/three-buttons-3.html"}
 	if d := h.detail(id); strings.Join(d.CanvasPaths, ",") != strings.Join(want, ",") {
 		t.Errorf("multi = %v, want %v", d.CanvasPaths, want)
+	}
+}
+
+func TestEveryResultGetsItsOwnTopLevelFolder(t *testing.T) {
+	h := setup(t)
+	h.scripted([]float64{9}, []float64{9})
+	first, _ := h.start(h.user, `{"input":{"brief":"pricing"}}`)
+	h.waitDone(first)
+
+	// Unfinished runs reserve their folder: two parallel changes of /pricing
+	// get two new groups, none inside /pricing.
+	release := make(chan struct{})
+	h.agents.handler = func(slug string, n int, req agentrun.NodeRequest) (*agentrun.NodeResult, error) {
+		<-release
+		return htmlResult("<div>v</div>"), nil
+	}
+	sel := `{"thread_id":"` + first + `","context_paths":["/pricing/pricing.html"],"input":{"brief":"pricing"}}`
+	a, _ := h.start(h.user, sel)
+	b, _ := h.start(h.user, sel)
+	if fa, fb := h.detail(a).CanvasFolder, h.detail(b).CanvasFolder; fa != "/pricing-2" || fb != "/pricing-3" {
+		t.Errorf("reserved folders = %q %q", fa, fb)
+	}
+	close(release)
+	h.waitDone(a)
+	h.waitDone(b)
+	for id, want := range map[string]string{a: "/pricing-2/pricing.html", b: "/pricing-3/pricing.html"} {
+		if d := h.detail(id); len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != want {
+			t.Errorf("paths = %v, want %s", d.CanvasPaths, want)
+		}
+	}
+
+	// A hint naming an existing (nested) folder becomes a new top-level one.
+	h.agents.handler = func(slug string, n int, req agentrun.NodeRequest) (*agentrun.NodeResult, error) {
+		res := htmlResult("<div>h</div>")
+		res.Folder = "/pricing"
+		return res, nil
+	}
+	id, _ := h.start(h.user, sel)
+	h.waitDone(id)
+	if d := h.detail(id); len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != "/pricing-4/pricing.html" {
+		t.Errorf("hinted existing folder = %v", d.CanvasPaths)
 	}
 }
 

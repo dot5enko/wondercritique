@@ -176,8 +176,13 @@ func TestPathRules(t *testing.T) {
 	if got := uniqueFile("/a/x.html", func(p string) bool { return taken[p] }); got != "/a/x-3.html" {
 		t.Errorf("uniqueFile = %s", got)
 	}
-	if got := uniqueFolder("/f", func(p string) bool { return taken[p] }); got != "/f-2" {
-		t.Errorf("uniqueFolder = %s", got)
+	if got := UniqueFolder("/f", func(p string) bool { return taken[p] }); got != "/f-2" {
+		t.Errorf("UniqueFolder = %s", got)
+	}
+	for in, want := range map[string]string{"Pricing/Dark": "/pricing-dark", "/cta/": "/cta", "dark theme": "/dark-theme", " / ": "", "": ""} {
+		if got := TopFolder(in); got != want {
+			t.Errorf("TopFolder(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

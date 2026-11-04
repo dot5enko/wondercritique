@@ -108,9 +108,10 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
 - **Start** (`start.go`): `context_paths` (≤ 12 entries, each a live file or folder of the thread;
   folders expand recursively, deduplicated; > 12 files after expansion, unknown/invalid paths or a
   missing `thread_id` → 400 field error `context_paths`; foreign thread → 404 via `checkThread`) →
-  `run.context_paths` (expanded file paths). `run.canvas_folder` = default destination: when
-  exactly one folder `F` holds every selected file → `F/<BriefSlug(brief)>` (a top-level folder
-  instead when `F` is already 4 levels deep), else `/<BriefSlug(brief)>`. The run row is created in
+  `run.context_paths` (expanded file paths). `run.canvas_folder` = default destination: always a
+  new top-level `/<BriefSlug(brief)>` regardless of the selection, made unique (`freshFolder`)
+  against the thread's live folders **and** the `canvas_folder` of its pending/running runs, so a
+  pending run already shows as its own group and parallel runs don't share one. The run row is created in
   one `dbx.Tx` with `canvas.TakeNotes` (texts on `run.canvas_notes`, each note reaches one run).
 - **Canvas context** (`buildCanvasSeed`) — iteration 1's loop seed (reaches agents whose template
   uses the loop port, e.g. `{{feedback}}`) and the prompt variable `canvas` (`nodeRun.samples`,
@@ -119,8 +120,8 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
   lines) → `### Changes the user made since the last message` (notes + "don't build on, reference
   or recreate them") → `### Selected components` (path + fenced HTML) **or**, without a
   selection, `### Latest result` (≤ 3 live files of the run that committed the newest file) →
-  `### Where your result goes` (never modify files; the result becomes new files in
-  `run.canvas_folder`; submit_artifact `folder`/`names`). HTML budget ≈ 60 000 chars, ≥ 2 000
+  `### Where your result goes` (never modify files; the result becomes new files in the new
+  top-level folder `run.canvas_folder`; submit_artifact `folder` = a name for that group, `names`). HTML budget ≈ 60 000 chars, ≥ 2 000
   per file. nil (no seed, no variable) for a thread with no files, notes or selection — a fresh
   chat's first run gets no seed.
 - **Destination hints**: an artifact-contract agent's `NodeResult.Folder/Names` (submit_artifact
@@ -129,7 +130,8 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
   workers don't produce hints (only the orchestrating agent's final submit does).
 - **Commit** (`finish` → `commitCanvas`, same tx as `result_artifacts`; on error the results are
   stored without canvas files and the error logged): item i = result i; folder = the hint
-  (normalized, not `/`, may be an existing folder) else `run.canvas_folder` (fresh → made unique);
+  flattened by `canvas.TopFolder` (`Pricing/Dark` → `/pricing-dark`) else `run.canvas_folder`;
+  always `Fresh` (made unique against live folders — results never join an existing folder);
   name = `names[i]` → the selected file's name (one file selected, one result) →
   `<BriefSlug>.html` (one result) / `<BriefSlug>-<i>.html`; `source_path` = the selected file when
   exactly one was selected; score = result score. `run.canvas_folder` is updated to the folder
@@ -137,8 +139,10 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
 - `RunDetail.canvas_paths` / `run_completed.canvas_paths` = `canvas.PathsOfRun`.
 - Tests (`engine_test.go`): `TestCompletedRunCommitsToTheCanvas` (default folder, follow-up seed =
   tree + latest result, `canvas` variable, `ThreadID` on node requests),
-  `TestSelectedComponentsSeedAndPlaceTheResult` (selection seed, `/login-form/dark/login-form.html`
+  `TestSelectedComponentsSeedAndPlaceTheResult` (selection seed, `/dark/login-form.html`
   with `source_path`, validation incl. folder expansion past 12), `TestAgentDestinationHintsWin`,
+  `TestEveryResultGetsItsOwnTopLevelFolder` (parallel runs reserve `/pricing-2`, `/pricing-3`; a
+  hint naming an existing folder → `/pricing-4`),
   `TestCanvasNotesReachTheNextRunOnce`; failed runs commit nothing; SSE carries `canvas_paths`.
 
 ## Agent bridge (`agentrun/node.go`)

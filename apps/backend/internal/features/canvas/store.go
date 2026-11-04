@@ -203,7 +203,7 @@ func (s *Store) Commit(ctx context.Context, thread, runID string, dest Dest, ite
 		}
 	}
 	if dest.Fresh {
-		folder = uniqueFolder(folder, func(f string) bool { return folders[f] })
+		folder = UniqueFolder(folder, func(f string) bool { return folders[f] })
 	}
 	out := make([]models.CanvasFile, 0, len(items))
 	for _, it := range items {

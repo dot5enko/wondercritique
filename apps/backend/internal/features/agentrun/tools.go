@@ -177,7 +177,7 @@ func submitTool(contract studio.OutputContract, fsys vfs.FS) tool.Tool {
 			HTML   string   `json:"html,omitempty" jsonschema_description:"The complete HTML component fragment"`
 			Path   string   `json:"path,omitempty" jsonschema_description:"Instead of html: a workspace file holding the component, e.g. /work/candidates/c2.html (or just c2)"`
 			Paths  []string `json:"paths,omitempty" jsonschema_description:"Several components as the result (one file each), e.g. when the user asked for 5 buttons"`
-			Folder string   `json:"folder,omitempty" jsonschema_description:"Canvas folder for the result, e.g. /pricing/dark — a NEW subfolder when changing an existing component"`
+			Folder string   `json:"folder,omitempty" jsonschema_description:"Name of the new canvas group for the result, e.g. pricing-dark — always becomes a NEW top-level folder"`
 			Names  []string `json:"names,omitempty" jsonschema_description:"File names, one per component, e.g. tiers.html"`
 		}
 		return tool.New("submit_artifact",

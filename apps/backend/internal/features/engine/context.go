@@ -58,27 +58,33 @@ func (e *Engine) resolveCanvas(ctx context.Context, p StartParams, threadID, bri
 		}
 		cr.selected = sel
 	}
-	return cr, defaultFolder(cr.selected, brief), nil
+	return cr, e.freshFolder(ctx, threadID, defaultFolder(brief)), nil
 }
 
-// defaultFolder: a new subfolder of the one folder holding every selected
-// file, else a new top-level folder named after the brief.
-func defaultFolder(selected []models.CanvasFile, brief string) string {
-	slug := canvas.BriefSlug(brief)
-	parent := ""
-	for i, f := range selected {
-		d := dirOf(f.Path)
-		if i == 0 {
-			parent = d
-		} else if d != parent {
-			parent = ""
-			break
+// defaultFolder: every result goes into a new top-level folder named after
+// the brief, never into the folder of the components it changes.
+func defaultFolder(brief string) string { return canvas.Join("/", canvas.BriefSlug(brief)) }
+
+// freshFolder makes a top-level folder unique among the thread's live folders
+// and the destinations of its unfinished runs, so a pending run already shows
+// as its own group. The commit makes it unique again against the live files.
+func (e *Engine) freshFolder(ctx context.Context, thread, folder string) string {
+	taken := map[string]bool{}
+	if files, err := e.Canvas.Files(ctx, thread); err == nil {
+		for _, f := range files {
+			for d := dirOf(f.Path); d != "/"; d = dirOf(d) {
+				taken[d] = true
+			}
 		}
 	}
-	if parent == "" || canvas.Depth(parent) >= canvas.MaxDepth {
-		return canvas.Join("/", slug)
+	var active []string
+	e.DB.WithContext(ctx).Model(&models.Run{}).
+		Where("thread_id = ? AND status IN ?", thread, []string{models.RunPending, models.RunRunning}).
+		Pluck("canvas_folder", &active)
+	for _, f := range active {
+		taken[f] = true
 	}
-	return canvas.Join(parent, slug)
+	return canvas.UniqueFolder(folder, func(f string) bool { return taken[f] })
 }
 
 func dirOf(p string) string {
@@ -138,12 +144,12 @@ func (e *Engine) buildCanvasSeed(ctx context.Context, run *models.Run, cr *canva
 		}
 	}
 
-	fmt.Fprintf(&b, "\n### Where your result goes\n\nNever modify existing files. Your result becomes NEW files in the folder %q", run.CanvasFolder)
-	if len(cr.selected) > 0 && dirOf(run.CanvasFolder) != "/" {
-		b.WriteString(" (a new subfolder next to the selected components)")
+	fmt.Fprintf(&b, "\n### Where your result goes\n\nNever modify existing files. Your result becomes NEW files in a new top-level folder %q", run.CanvasFolder)
+	if len(cr.selected) > 0 {
+		b.WriteString(" (its own group, apart from the selected components)")
 	}
-	b.WriteString(". You may choose a better folder and file names: call submit_artifact with `folder` ")
-	b.WriteString("(a new subfolder for changes, a new top-level folder for a new design) and `names` ")
+	b.WriteString(". You may choose a better folder name and file names: call submit_artifact with `folder` ")
+	b.WriteString("(one short name for the new group; it always becomes a new top-level folder) and `names` ")
 	b.WriteString("(one per component; keep the original file name when you make a new version of one component).\n")
 	return &portVal{Text: b.String()}
 }
@@ -284,12 +290,11 @@ func (e *Engine) commitCanvas(ctx context.Context, run *models.Run, st *runState
 
 	dest := canvas.Dest{Folder: run.CanvasFolder, Fresh: true}
 	if dest.Folder == "" {
-		dest.Folder = defaultFolder(cr.selected, cr.brief)
+		dest.Folder = defaultFolder(cr.brief)
 	}
-	if hint.folder != "" {
-		if f, err := canvas.NormalizeFolder(hint.folder); err == nil && f != "/" {
-			dest = canvas.Dest{Folder: f}
-		}
+	// The agent may name the group, but results never join an existing folder.
+	if f := canvas.TopFolder(hint.folder); f != "" {
+		dest.Folder = f
 	}
 
 	source := ""
