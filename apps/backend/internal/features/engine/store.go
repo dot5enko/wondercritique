@@ -170,7 +170,7 @@ func (e *Engine) RunDetail(ctx context.Context, id string, v Viewer) (*RunDetail
 		Usage: &run.Usage, Cost: run.Cost, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, ThreadID: run.ThreadID, PipelineBody: run.Snapshot,
 		ContextPaths: nonNil(run.ContextPaths), CanvasFolder: run.CanvasFolder, CanvasNotes: nonNil(run.CanvasNotes),
 		CanvasPaths: []string{}, Mode: modeOf(run), AgentID: run.AgentID, Reply: run.Reply,
-		Steps:       make([]StepView, 0, len(steps)), Artifacts: make([]ArtifactView, 0, len(arts)),
+		Steps: make([]StepView, 0, len(steps)), Artifacts: make([]ArtifactView, 0, len(arts)),
 		Results: make([]ResultView, 0, len(results)),
 	}
 	if e.Canvas != nil {

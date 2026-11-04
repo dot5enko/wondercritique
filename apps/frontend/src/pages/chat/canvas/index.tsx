@@ -43,7 +43,6 @@ import { Button, cx, IconButton } from '../../../ui'
 import { Callout } from '../../../ui/Display'
 import { Modal } from '../../../components/Modal'
 import { ErrorState, isBackendMissing } from '../../../components'
-import { useAsync } from '../../../hooks'
 import {
   isTerminalRunStatus,
   listRuns,
@@ -62,8 +61,6 @@ import {
   restoreCanvasOp,
   type CanvasFile,
 } from '../../../api/canvas'
-import { getVersion, listDefs } from '../../../api/studio'
-import { parseInputFields } from '../../runs/NewRunModal'
 import { RunDetailView } from '../../runs/detail'
 import { useThreads } from '../threads'
 import { useViewport, type HandleInfo, type MenuInfo, type TapInfo } from './useViewport'
@@ -131,9 +128,12 @@ const MAX_CONTEXT_FILES = 12
 const selectorOf = (key: string): string => `[data-sel="${CSS.escape(key)}"]`
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v))
 
-/** Text of a run's message: the pipeline's primary field, else `brief`, else the first text value. */
-function briefOf(input: Record<string, unknown> | undefined, field: string): string {
-  const v = input?.[field] ?? input?.['brief']
+/** The agent the design chat talks to (a chat agent with gen_components, not a pipeline). */
+const CHAT_AGENT = 'canvas-chat'
+
+/** Text of a run's message: `brief`, else the first text value. */
+function briefOf(input: Record<string, unknown> | undefined): string {
+  const v = input?.['brief']
   if (typeof v === 'string' && v.trim()) return v.trim()
   for (const x of Object.values(input ?? {})) if (typeof x === 'string' && x.trim() && !x.startsWith('wcblob://')) return x.trim()
   return '(message)'
@@ -142,30 +142,11 @@ function briefOf(input: Record<string, unknown> | undefined, field: string): str
 const errorText = (err: unknown, fallback: string): string =>
   isBackendMissing(err) ? "The canvas backend can't be reached." : err instanceof Error && err.message ? err.message : fallback
 
-/**
- * Input field the message text goes to: the default pipeline's first non-image
- * field (admins can read pipeline defs), else `brief` — which is also what the
- * engine falls back to.
- */
-function usePrimaryField(): string {
-  const q = useAsync(async (signal): Promise<string> => {
-    const defs = await listDefs('pipeline', { limit: 100 }, signal)
-    const published = defs.items.filter((d) => d.latest_version != null)
-    const def = published.find((p) => p.slug === 'default') ?? published[0]
-    if (!def || def.latest_version == null) return 'brief'
-    const ver = await getVersion('pipeline', def.id, def.latest_version, signal)
-    const f = parseInputFields(ver.body).find((x) => (x.type ?? 'text').toLowerCase() !== 'image')
-    return f?.name ?? 'brief'
-  }, [])
-  return q.data ?? 'brief'
-}
-
 export default function CanvasPage() {
   const { threadId: param } = useParams()
   const threadId = param && param !== 'new' ? param : null
   const navigate = useNavigate()
   const { query: threadsQ, threads } = useThreads()
-  const field = usePrimaryField()
   const title = threads.find((t) => t.id === threadId)?.title ?? (threadId ? '' : 'New chat')
 
   /* ---------- the thread's runs (= messages) ---------- */
@@ -248,14 +229,17 @@ export default function CanvasPage() {
   const runIndex = useMemo(() => new Map(runs.map((r, i) => [r.id, i + 1])), [runs])
   const messageOf = useCallback((runId: string) => {
     const r = runs.find((x) => x.id === runId)
-    return r ? { index: runIndex.get(runId) ?? 0, brief: briefOf(r.input, field) } : null
-  }, [runs, runIndex, field])
+    return r ? { index: runIndex.get(runId) ?? 0, brief: briefOf(r.input), reply: r.reply ?? '' } : null
+  }, [runs, runIndex])
 
-  /** Messages without a result on the canvas yet: running, failed or stopped (their pending cards). */
-  const pendingRuns = useMemo(
-    () => runs.filter((r) => (statuses[r.id] ?? r.status) !== 'completed'),
-    [runs, statuses],
-  )
+  /**
+   * Messages without a result on the canvas: running, failed or stopped, and
+   * completed ones the agent only answered in text (their cards).
+   */
+  const pendingRuns = useMemo(() => {
+    const withFiles = new Set(files.map((f) => f.run_id))
+    return runs.filter((r) => (statuses[r.id] ?? r.status) !== 'completed' || (r.status === 'completed' && !!r.reply && !withFiles.has(r.id)))
+  }, [runs, statuses, files])
   const tree = useMemo(
     () => buildTree(files, pendingRuns.map((r) => ({ id: r.id, folder: r.canvas_folder || '/' }))),
     [files, pendingRuns],
@@ -531,7 +515,8 @@ export default function CanvasPage() {
     setSendError(null)
     try {
       const res = await startRun({
-        input: { [field]: brief },
+        agent: CHAT_AGENT,
+        input: { brief },
         ...(threadId ? { thread_id: threadId } : {}),
         ...(contextPaths.length > 0 ? { context_paths: contextPaths } : {}),
       })
@@ -550,7 +535,7 @@ export default function CanvasPage() {
   }
   const sendWithSelection = (message: string): void => void send(message, selection.flatMap(pathsOf))
   const retryRef = useRef<(run: Run) => void>(() => {})
-  retryRef.current = (run) => void send(briefOf(run.input, field), (run.context_paths ?? []).filter((p) => fileByPath.has(p)))
+  retryRef.current = (run) => void send(briefOf(run.input), (run.context_paths ?? []).filter((p) => fileByPath.has(p)))
   // stable, so the memoized groups don't re-render on every keystroke
   const retry = useCallback((run: Run) => retryRef.current(run), [])
 

@@ -15,7 +15,7 @@ import { Ban, RotateCw } from 'lucide-react'
 import { Button } from '../../ui/Button'
 import { Badge, Callout, Card, CardBody, CardHeader, EmptyState, Skeleton } from '../../ui/Display'
 import { Segmented } from '../../ui/Form'
-import { ConfirmDialog, ErrorState, InlineSpinner, PageHeader, relativeTime } from '../../components'
+import { ConfirmDialog, ErrorState, InlineSpinner, Markdown, PageHeader, relativeTime } from '../../components'
 import { useAsync } from '../../hooks'
 import {
   cancelRun,
@@ -78,6 +78,7 @@ export function applyRunEvent(run: Run, ev: RunEvent): Run {
         best_artifact_id: ev.best_artifact_id ?? run.best_artifact_id,
         usage: ev.usage ?? run.usage,
         cost: ev.cost ?? run.cost,
+        reply: ev.reply ?? run.reply,
         updated_at: new Date().toISOString(),
       }
     case 'run_failed':
@@ -391,6 +392,14 @@ export function RunDetailView({ runId: id }: { runId: string }) {
         >
           {run.error}
         </Callout>
+      )}
+      {run?.reply && (
+        <Card className="mt-3">
+          <CardHeader title="Reply" />
+          <CardBody>
+            <Markdown text={run.reply} className="text-sm text-ink" />
+          </CardBody>
+        </Card>
       )}
 
       {!run ? (

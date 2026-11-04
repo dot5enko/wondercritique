@@ -106,6 +106,9 @@ func sinkFrom(ctx context.Context) Sink {
 	return s
 }
 
+// SinkFrom returns the Sink attached by WithSink (nil outside a pipeline step).
+func SinkFrom(ctx context.Context) Sink { return sinkFrom(ctx) }
+
 // nodeScope is what RunNode knows about the run that tools may need.
 type nodeScope struct {
 	samples map[string]any

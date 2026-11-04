@@ -147,7 +147,8 @@ export interface ModelSetBody {
 }
 
 export interface AgentOutputContract {
-  type: 'artifact' | 'critique' | 'custom'
+  /** `chat`: plain-text reply; components come from the gen_components tool. */
+  type: 'artifact' | 'critique' | 'custom' | 'chat'
   /** Required when type is `custom` (JSON Schema of the structured fields). */
   fields_schema?: JSONSchema
 }
@@ -172,6 +173,8 @@ export interface AgentBody {
 
 export interface ToolConfig {
   generate_components?: { agent_id?: string; max_count?: number }
+  /** Worker generator of gen_components (default: `component-generator`). */
+  gen_components?: { agent_id?: string; max_count?: number }
   pick_best?: { judge_agent_id?: string }
   critique_component?: { critic_agent_id?: string }
 }

@@ -82,9 +82,9 @@ type ToolConfig struct {
 	GenerateComponents *GenerateToolConfig `json:"generate_components,omitempty"`
 	// GenComponents configures gen_components (agent_id empty = the agent
 	// with slug DefaultWorkerSlug).
-	GenComponents      *GenerateToolConfig `json:"gen_components,omitempty"`
-	PickBest           *PickBestToolConfig `json:"pick_best,omitempty"`
-	CritiqueComponent  *CritiqueToolConfig `json:"critique_component,omitempty"`
+	GenComponents     *GenerateToolConfig `json:"gen_components,omitempty"`
+	PickBest          *PickBestToolConfig `json:"pick_best,omitempty"`
+	CritiqueComponent *CritiqueToolConfig `json:"critique_component,omitempty"`
 }
 
 // GenerateToolConfig configures generate_components.

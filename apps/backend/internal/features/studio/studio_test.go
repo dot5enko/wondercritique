@@ -551,7 +551,7 @@ func TestCatalog(t *testing.T) {
 			t.Errorf("missing node type %q", want)
 		}
 	}
-	if len(cat.Tools) != 13 {
+	if len(cat.Tools) != 14 {
 		t.Errorf("tools = %d", len(cat.Tools))
 	}
 	for _, t2 := range cat.Tools {
@@ -584,7 +584,7 @@ func TestSeedDefaultsIdempotent(t *testing.T) {
 	if err := SeedDefaults(ctx, h.store, log); err != nil {
 		t.Fatal(err)
 	}
-	for kind, want := range map[string]int{KindModelSet: 1, KindAgent: 5, KindPipeline: 1, KindRule: 1, KindSkill: 0} {
+	for kind, want := range map[string]int{KindModelSet: 1, KindAgent: 6, KindPipeline: 1, KindRule: 1, KindSkill: 0} {
 		defs, err := h.store.List(ctx, kind)
 		if err != nil {
 			t.Fatal(err)

@@ -47,7 +47,8 @@ no borders/dividers, `px-3` padding, `space-y-2` between cards) — updated 2026
   Variable chips (`catalog.prompt_variables`, e.g. `{{brief}}`) insert at the caret of the
   last-focused textarea.
 - Tools/skills/rules are checkbox groups from the catalog.
-- Output contract: Segmented `artifact|critique|custom`; custom renders a fields-row editor
+- Output contract: Segmented `artifact|critique|custom|chat` (chat: hint line — plain-text reply,
+  gen_components results); custom renders a fields-row editor
   (name/type/description/required/enum) that compiles to a JSON Schema `fields_schema`
   (`{type:'object',properties,required}`) and re-parses on restore.
 - "Show assembled prompt" → `POST /studio/agents/{id}/preview` modal (system + input panes).
@@ -61,7 +62,8 @@ no borders/dividers, `px-3` padding, `space-y-2` between cards) — updated 2026
   dialog and usage reloads (2026-11-02).
 - List page: intro copy ("agents are the workers a pipeline calls…") and a backend-unavailable
   Callout on 404/501/503/network. No per-agent chat action — standalone agent chat was removed
-  (2026-11-02); agents run only inside pipelines.
+  (2026-11-02); agents run inside pipelines, and the design chat runs the `canvas-chat` agent
+  directly (agent-mode runs, 2026-11-04).
 
 ## Pipelines (`/studio/pipelines`, plan §4.5)
 
@@ -188,7 +190,9 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   virtual folders, outline when selected — widths use `--inv-k`) that extends left / up around
   items moved past the block's edge. Header = folder name (`folderLabel`: last segment + `/`,
   root = "Top level"; full path as tooltip; "new folder" tag when virtual) + "from message N:
-  brief" with a Details button (`firstRun`); `CHROME_ZOOM` (`zoom: min(4, max(1, --inv-k))`) keeps
+  brief" with a Details button (`firstRun`) + (top groups) the chat agent's reply of that message
+  (`Reply`: markdown in a rounded block, `line-clamp-4`, tap toggles full text,
+  `data-canvas-ui`); `CHROME_ZOOM` (`zoom: min(4, max(1, --inv-k))`) keeps
   it readable zoomed out. Items container (wrap default `max-w-[5400px]`, `row`, `col` per
   `layout.dir[path]`; gaps x 64 / y 80): the folder's files (`ComponentFrame`, label = file name +
   score), then pending cards, then subfolders (nested `FolderGroup`s). A rAF + ResizeObserver
@@ -196,13 +200,14 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   items (no layout shift). Everything the groups need comes in one memoized `GroupEnv` (selection
   set, layout, `messageOf`, `onDetails`, `onRetry`, `onStatus`).
 - **`PendingCard`** (in FolderGroup.tsx): a run that is running / failed / cancelled / interrupted
-  (`statuses[id] ?? listed status` ≠ completed) shows as a dashed card `[data-pending=<run>]`
+  (`statuses[id] ?? listed status` ≠ completed) **or a completed reply-only message** (listed
+  `reply`, no file of the run on the canvas) shows as a dashed card `[data-pending=<run>]`
   inside the group of `run.canvas_folder` (virtual folders are created in the tree when it doesn't
-  exist yet): message number + brief, "about <file names>" (`run.context_paths`), `RunProgress`
-  while running, error line, Stop / Try again (failed, cancelled, interrupted) / Reconnect /
-  Details, and the latest iteration's html artifacts as drafts (`useRunLive` + `componentsOf`;
-  frames without a selection key). Completed runs show nothing extra — their files are in the
-  tree.
+  exist yet): message number + brief, "about <file names>" (`run.context_paths`), the reply
+  (`Reply`), `RunProgress` while running, error line, Stop / Try again (failed, cancelled,
+  interrupted) / Reconnect / Details, and the latest iteration's html artifacts as drafts
+  (`useRunLive` + `componentsOf`; gen_components results appear here live; frames without a
+  selection key). Completed runs with files show nothing extra — their files are in the tree.
 - **`ComponentFrame`** (`canvas/ComponentFrame.tsx`, `memo`): `id` = artifact id (loaded/cached,
   immutable), `selKey` = `data-sel` (`c:<path>`; none for drafts), label = file name + score —
   **absolutely positioned above the box** (`bottom-full`, 28px
@@ -240,10 +245,11 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   deselect), Shift/⌘/Ctrl or "Select more" mode (banner in the composer with Done) = toggle; tap on
   empty canvas clears (not in select mode). Long press on an unselected target selects it (adds in
   select mode); starting a handle drag selects too. Chips in the composer show file names /
-  `folder/`. Sending → `startRun({input:{[field]: text}, thread_id?, context_paths})`: the selected
+  `folder/`. Sending → `startRun({agent: 'canvas-chat', input:{brief: text}, thread_id?,
+  context_paths})` — the chat talks to the `canvas-chat` agent, not a pipeline
+  (`docs/backend.chat-agent.md`): the selected
   paths (folders as folder paths — the server expands them; the root group `g:/` sends its direct
-  files), client-side cap 12 files after expansion (error in the composer). `field` = default
-  pipeline's first non-image input field (admin-only lookup) else `brief`. Sending is allowed while
+  files), client-side cap 12 files after expansion (error in the composer). Sending is allowed while
   other runs are going; the first message of `/chat/new` navigates (replace) to `/chat/<thread>`.
   Try again resends the brief with the run's `context_paths` that still exist.
 - **Context menu** (`canvas/ContextMenu.tsx`, fixed at the press point, clamped/flipped, touch rows
@@ -286,13 +292,13 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   touch tablet (820×1180), serving `dist` and a stubbed `/api/v1` purely through `context.route`
   (no dev server, no backend): runs (each POST → running run `R<n>` with `canvas_folder
   /new-r<n>`) and a mutable canvas (`GET/PUT /threads/R1/canvas…`, delete/restore/move) with
-  `/pricing/{card-one,card-two}.html`, nested `/pricing/dark/card-one.html`, `/hero/wide-hero.html`
+  `/pricing/{card-one,card-two}.html` (R1 is an agent-mode run with a reply), nested `/pricing/dark/card-one.html`, `/hero/wide-hero.html`
   and a running run targeting `/hero/taller`. Touch via CDP `Input.dispatchTouchEvent`; prompts
-  answered through `page.on('dialog')`; fit via `Shift+Digit1`. 60 checks: groups = folders incl.
+  answered through `page.on('dialog')`; fit via `Shift+Digit1`. 61 checks: groups = folders incl.
   nested, folder header origin, file labels, pending card in its virtual target folder, frame
   shrink, tap / long-press / select-more, pinch, pan, freezing (card fixtures carry a CSS
   animation + rAF counter `__ticks`: off-screen frozen, settled running, mid-pan frozen, resumes
-  after settle), quick action posts `context_paths`, group →
+  after settle), quick action posts `context_paths` + `agent: canvas-chat`, the agent reply in the group header, group →
   folder path, handles (move both ways, background grows, scale), debounced layout PUT with path
   keys, arrange (folder col, groups row), reset, Reset layout, free layout, toolbar, delete → server
   + undo → restore, nested folder delete, rename folder → move, move to folder → new group, no
@@ -327,7 +333,10 @@ created thread. Only the toolbar place stays in localStorage.
 ## Candidate tools UI (updated 2026-11-02)
 
 - Agent editor (`AgentForm.tsx`): "Candidate tools" card appears when generate_components /
-  pick_best / critique_component are enabled; edits `tool_config` (agent pickers from
-  `catalog.agents`, max count). Model-set strategy is single|fallback only.
+  gen_components / pick_best / critique_component are enabled; edits `tool_config` (agent pickers
+  from `catalog.agents`, max count; gen_components: generator default `component-generator`,
+  max 8). Model-set strategy is single|fallback only.
+- Run detail shows a "Reply" card (markdown) for agent-mode runs; `applyRunEvent` merges
+  `run_completed.reply`.
 - Canvas: every result of a completed run becomes its own file on the canvas (engine commit, see
   `docs/backend.engine.md` "Canvas").

@@ -12,9 +12,10 @@
  * top-level block can be moved on the canvas by its top-edge handle (then it's
  * absolutely positioned — `free`); nested blocks move inside their parent.
  */
-import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Ban, ListTree, RotateCw } from 'lucide-react'
 import { Button, cx } from '../../../ui'
+import { Markdown } from '../../../components'
 import { baseOf, type CanvasFile } from '../../../api/canvas'
 import { cancelRun, isTerminalRunStatus, type Run, type RunStatus } from '../../../api/runs'
 import { usePipelineBody } from '../../runs/usePipelineBody'
@@ -41,8 +42,8 @@ export const CHROME_ZOOM = 'min(4, max(1, var(--inv-k, 1)))'
 export interface GroupEnv {
   selection: Set<string>
   layout: CanvasLayout
-  /** message number + brief of a run of the chat. */
-  messageOf: (runId: string) => { index: number; brief: string } | null
+  /** message number + brief (+ the chat agent's reply) of a run of the chat. */
+  messageOf: (runId: string) => { index: number; brief: string; reply: string } | null
   onDetails: (runId: string) => void
   onRetry: (run: Run) => void
   onStatus: (runId: string, status: RunStatus) => void
@@ -163,6 +164,7 @@ export const FolderGroup = memo(function FolderGroup({
             </span>
           </div>
         )}
+        {top && origin?.reply && <Reply text={origin.reply} />}
       </header>
 
       {empty ? null : (
@@ -200,10 +202,26 @@ function FileFrame({ file, env, groupSelected }: { file: CanvasFile; env: GroupE
   )
 }
 
+/** The chat agent's answer to a message (markdown, clamped; click to expand). */
+function Reply({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div
+      data-canvas-ui
+      className={cx('max-w-[60ch] cursor-pointer rounded-2xl bg-surface/80 px-3.5 py-2.5 text-sm text-ink-2', !open && 'line-clamp-4')}
+      title={open ? undefined : 'Show the whole reply'}
+      onClick={() => setOpen((v) => !v)}
+    >
+      <Markdown text={text} />
+    </div>
+  )
+}
+
 /**
- * A message still working on its result (or one that failed / stopped): the
- * brief, live progress, the latest drafts and Stop / Try again / Details.
- * Completed messages show nothing extra — their files are in the tree.
+ * A message still working on its result (or one that failed / stopped, or one
+ * the agent only answered in text): the brief, live progress, the reply, the
+ * latest drafts and Stop / Try again / Details. Completed messages with files
+ * show nothing extra — their files are in the tree.
  */
 const PendingCard = memo(function PendingCard({ runId, env }: { runId: string; env: GroupEnv }) {
   const { run, error, activity, streamError, retryStream } = useRunLive(runId)
@@ -220,6 +238,7 @@ const PendingCard = memo(function PendingCard({ runId, env }: { runId: string; e
   const running = run == null || !isTerminalRunStatus(run.status)
   const msg = env.messageOf(runId)
   const refs = (run?.context_paths ?? []).map(baseOf)
+  const reply = run?.reply || msg?.reply || ''
 
   return (
     <div data-pending={runId} className="relative flex shrink-0 flex-col gap-6 rounded-[28px] border-2 border-dashed border-line-strong p-8">
@@ -231,6 +250,11 @@ const PendingCard = memo(function PendingCard({ runId, env }: { runId: string; e
           </p>
         </div>
         {refs.length > 0 && <p className="pl-6 text-xs text-ink-3">about {refs.join(', ')}</p>}
+        {reply && (
+          <div className="pl-6">
+            <Reply text={reply} />
+          </div>
+        )}
         {run && (running || run.error || streamError != null) && (
           <div className="flex w-[min(560px,100%)] flex-col gap-2 pl-6 text-sm">
             {running && <RunProgress run={run} nodeLabels={nodeLabels} nodeOrder={nodeOrder} activity={activity} />}

@@ -470,7 +470,7 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
       </Card>
 
       {/* Multi-candidate tool settings */}
-      {(['generate_components', 'pick_best', 'critique_component'] as const).some((t) => draft.tools.includes(t)) && (
+      {(['generate_components', 'gen_components', 'pick_best', 'critique_component'] as const).some((t) => draft.tools.includes(t)) && (
         <Card plain>
           <CardHeader
             plain
@@ -497,6 +497,29 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
                     className="w-24"
                     value={draft.tool_config?.generate_components?.max_count ?? ''}
                     onChange={(e) => setToolConfig('generate_components', { max_count: Number(e.target.value) || 0 })}
+                  />
+                </Field>
+              </>
+            )}
+            {draft.tools.includes('gen_components') && (
+              <>
+                <Field label="gen_components generator" hint="Default: component-generator.">
+                  <Select
+                    className="w-full max-w-sm"
+                    ariaLabel="gen_components generator"
+                    options={agentOptions('Default (component-generator)')}
+                    value={draft.tool_config?.gen_components?.agent_id ?? ''}
+                    onChange={(v) => setToolConfig('gen_components', { agent_id: v })}
+                  />
+                </Field>
+                <Field label="Max components per call" hint="1–8, default 8.">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={8}
+                    className="w-24"
+                    value={draft.tool_config?.gen_components?.max_count ?? ''}
+                    onChange={(e) => setToolConfig('gen_components', { max_count: Number(e.target.value) || 0 })}
                   />
                 </Field>
               </>
@@ -587,10 +610,16 @@ export function AgentForm({ def, catalog, dd, flushDraft, onReloadDef }: AgentFo
               { value: 'artifact', label: 'Artifact' },
               { value: 'critique', label: 'Critique' },
               { value: 'custom', label: 'Custom' },
+              { value: 'chat', label: 'Chat' },
             ]}
             value={draft.output_contract.type}
             onChange={setContractType}
           />
+          {draft.output_contract.type === 'chat' && (
+            <p className="text-xs text-ink-3">
+              Answers in plain text (the reply in the design chat). Every component it creates with gen_components is a result.
+            </p>
+          )}
           {draft.output_contract.type === 'custom' && (
             <>
               {rows.length > 0 && (

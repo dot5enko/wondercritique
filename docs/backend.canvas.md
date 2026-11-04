@@ -92,6 +92,7 @@ Content keeps using `GET /artifacts/{id}/content` (engine, sandboxed CSP).
 
 ## Engine side (summary — details in `docs/backend.engine.md`)
 
+Pipeline and agent-mode runs (`docs/backend.chat-agent.md`) commit the same way.
 `POST /runs` `context_paths` → `Resolve`; default destination folder on `run.canvas_folder`;
 `TakeNotes` in the run-creation tx (`run.canvas_notes`); the canvas context seeds iteration 1;
 a completed run's results are committed in `finish` (same tx as `result_artifacts`).

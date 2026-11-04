@@ -1,8 +1,10 @@
 # Backend — pipeline engine and runs API
 
-**State as of 2026-11-04** (canvas integration: `context_paths`, canvas context, commit of results). Phase 6 of `plan.critique-engine.md`: a prompt in the design chat
-becomes a pipeline run (generate → render → critique → gate loop → output) whose steps, artifacts
-and live events the UI shows. Package `internal/features/engine` (`engine.Module`), models in
+**State as of 2026-11-04** (canvas integration: `context_paths`, canvas context, commit of results;
+agent-mode runs). Phase 6 of `plan.critique-engine.md`: a run executes a pipeline (generate →
+render → critique → gate loop → output) whose steps, artifacts and live events the UI shows.
+**The design chat runs in agent mode** (`agent: "canvas-chat"`, a synthesized Input → Agent
+graph, reply + gen_components results) — see `docs/backend.chat-agent.md`. Package `internal/features/engine` (`engine.Module`), models in
 `internal/models/run.go`, node-agent bridge in `internal/features/agentrun/node.go`.
 
 Verify: from `apps/backend`, `go test ./internal/features/engine ./internal/features/agentrun`
@@ -12,7 +14,8 @@ in-memory DB answers parallel writers with SQLITE_LOCKED). Tests use a fake `Nod
 
 ## Data model (`runs`, `run_steps`, `artifacts`)
 
-- `Run`: owner, `thread_id` (= id of the thread's first run), `context_paths` (JSON, selected
+- `Run`: owner, `thread_id` (= id of the thread's first run), `mode` (pipeline|agent), `agent_id`,
+  `reply` (chat agent answer), `context_paths` (JSON, selected
   canvas files), `canvas_folder` (default destination at start → folder used after commit),
   `canvas_notes` (JSON, the user's canvas operations delivered to this run), pipeline def id/slug/name, pinned
   `pipeline_version` + `pipeline_version_id` (`studio_def_versions.id`; both empty for draft test runs),
@@ -33,9 +36,9 @@ in-memory DB answers parallel writers with SQLITE_LOCKED). Tests use a fake `Nod
 
 | Route | Notes |
 |---|---|
-| `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, thread_id?, is_test?, context_paths?}` → **201** `{id, thread_id, status}`; the run executes in the background |
-| `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input, context_paths (always an array), canvas_folder |
-| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) + `context_paths`, `canvas_folder`, `canvas_notes`, `canvas_paths` (live files the run committed; arrays never null) |
+| `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, agent?, thread_id?, is_test?, context_paths?}` → **201** `{id, thread_id, status}`; the run executes in the background; `agent` = agent mode |
+| `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input, context_paths (always an array), canvas_folder, mode, reply |
+| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) + `context_paths`, `canvas_folder`, `canvas_notes`, `canvas_paths` (live files the run committed; arrays never null), `mode`, `agent_id`, `reply` |
 | `GET /runs/{id}/events` | SSE; replays the run's history, then live; closes after `run_completed`/`run_failed`; `: ping` every 15 s. SSE requests skip the 60 s request timeout |
 | `POST /runs/{id}/cancel` | 204; 409 when already finished; a stale (not executing) pending/running row is marked cancelled |
 | `GET /artifacts/{id}/content` | blob with its stored MIME; `nosniff` + `Content-Security-Policy: … sandbox`; access follows the run's owner scoping |
@@ -78,7 +81,7 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
 | Node | Behaviour |
 |---|---|
 | `input` | ports `brief` (`briefOf`: `brief` else first text value) and `references` (all `wcblob://` inputs); step output = the input map |
-| `agent` | `agentrun.RunNode` (below). Prompt variables = all run input fields, overridden by wired ports (same name; a list of images stays a list). Contract artifact → ports `html`/`artifact` + html artifact (becomes the iteration's *candidate*); critique → port `critique` + json artifact with score; custom → port `output` + json artifact. Config: `agent_id`, `agent_version` (pin), `model_set_id` (override); 15 min timeout |
+| `agent` | `agentrun.RunNode` (below). Prompt variables = all run input fields + `canvas` + `history` (agent mode), overridden by wired ports (same name; a list of images stays a list). Contract artifact → ports `html`/`artifact` + html artifact (becomes the iteration's *candidate*); critique → port `critique` + json artifact with score; custom → port `output` + json artifact; chat → reply (`run.reply`, port `output`) + the gen_components components as the iteration's set (`candidates`). Config: `agent_id`, `agent_version` (pin), `model_set_id` (override); 30 min timeout |
 | `validate` | `component.Validate` → port `report`, json artifact (never fails on violations) |
 | `render` | `render.Renderer` (config `width` 1280, `dpr` 2, `color_scheme`, `variants[]`); ports `images` (`wcblob://` per shot, one image artifact each) and `metrics`; step output keeps metrics minus `text_runs`; 90 s timeout. `ErrNoBrowser` → "no Chrome/Chromium was found on the server (set RENDER_CHROME_PATH)" |
 | `merge` | critiques (`dedupe` default true) → mean score, strengths/issues merged (issues deduped by code+message, highest severity, ordered error→info); json artifact with score |
@@ -185,7 +188,9 @@ Title, OnEvent}) (*NodeResult, error)`:
   `vision-judge`) via `agentrun.Judge`, sets the winner as the iteration candidate. A single
   candidate passes through.
 - `stepSink` (agentrun.Sink via ctx) records tool-made artifacts on the step and sums nested-run
-  usage/cost; step output includes `tools` events (`generated`, `picked`). `agentNodeTimeout` = 30m.
+  usage/cost; step output includes `tools` events (`generated`, `picked`); `Component` records a
+  gen_components result (html artifact + name/folder/source hints, see
+  `docs/backend.chat-agent.md`). `agentNodeTimeout` = 30m.
 
 ## Known limits / future work
 

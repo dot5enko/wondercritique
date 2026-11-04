@@ -72,8 +72,9 @@ value (false outside `/chat`). The chat page's timeline + composer column is
 The thread list is shared via `ThreadsProvider`/`useThreads()` (`pages/chat/threads.tsx`, one
 `listRuns({limit:100})` query) — mounted by the Shell and, separately, by the chat route group.
 Non-admins never see Settings and get a Forbidden page on admin routes. There is deliberately
-**no standalone agent chat** (removed 2026-11-02): agents are only used through pipelines; the
-agent editor's Try-it modal is the only direct way to call one.
+**no standalone agent chat page** (removed 2026-11-02); the design canvas talks to the
+`canvas-chat` agent through agent-mode runs (2026-11-04, `docs/backend.chat-agent.md`), other
+agents run inside pipelines or the editor's Try-it modal.
 
 Studio pages switch list↔editor via the `?id=` search param inside their `index.tsx`
 (no nested routes). Draft editing uses `useDirtyDraft` (debounced autosave `PUT …/draft`) +
@@ -94,7 +95,8 @@ is the backend reference. Reconciled and verified by `npm run typecheck`:
 - `agents.ts` — the generic chat mount `/agents/{slug}/…` serves every published agent
   (agentkit httpapi surface, unchanged).
 - `runs.ts` — **implemented by the engine (2026-11-02, plan phase 6; `docs/backend.engine.md`)**:
-  `POST /runs` → 201 `{id, thread_id, status}`, `GET /runs` (offset paging, `filter[thread_id]`),
+  `POST /runs` (`agent?` = agent mode) → 201 `{id, thread_id, status}`, `GET /runs` (offset
+  paging, `filter[thread_id]`; items carry `mode`, `reply`),
   `GET /runs/{id}` (+ `pipeline_body` snapshot), `/runs/{id}/events` SSE (history replay, closes
   after the terminal event), `/runs/{id}/cancel`, `/artifacts/{id}/content`. Critique scores run
   0–10. Typecheck passes against these shapes; the chat has not been exercised against a live model

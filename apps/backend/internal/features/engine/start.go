@@ -33,7 +33,7 @@ type StartParams struct {
 	// Agent (id or slug) runs one chat agent instead of a pipeline.
 	Agent    string
 	ThreadID string
-	IsTest            bool
+	IsTest   bool
 	// Input values are JSON strings or {"artifact_id": "..."} objects.
 	Input map[string]json.RawMessage
 	// ContextPaths are canvas files or folders of the thread the message is about.

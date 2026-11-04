@@ -67,7 +67,8 @@ constructors, so it can't catch mount conflicts.
   in the editor; publish of an empty set → 400 "add at least one model before publishing". No
   catalog lookup at save time (runtime enforces enablement; an unpublished empty set has no
   buildable entry, so the runtime's draft fallback fails for it).
-- agent: model_set_id must exist (any state); contract type artifact|critique|custom; custom needs
+- agent: model_set_id must exist (any state); contract type artifact|critique|custom|chat (chat =
+  plain-text reply, no submit tool — `docs/backend.chat-agent.md`); custom needs
   a JSON object schema with non-empty `properties`; limits ≥ 0; tools ⊆ catalog tool names;
   skill_ids/rule_ids must reference existing defs (checked in the controller against the store).
 - skill: ≥1 file; exactly one root-level `SKILL.md`; paths relative with vfs.Clean semantics (no
@@ -89,7 +90,9 @@ prompt_variables, validator_rule_codes}` (+ unexported `Agents` used by pipeline
 Node types: input, agent (generic superset ports), validate, render (width 1280/dpr 2 defaults),
 merge, gate (continue/done outputs), output (strategy best|last). Tools are exactly what the
 runtime wires: `read_file, write_file, edit_file, glob, grep` (fs), `run_js` (sandbox),
-`validate_component`, `submit_artifact/submit_critique/submit_fields` (terminal). Models come from
+`validate_component`, `generate_components/pick_best/critique_component` (candidates),
+`gen_components` (components), `submit_artifact/submit_critique/submit_fields` (terminal) — 14
+tools. Prompt variables include `canvas` and `history` (chat agents). Models come from
 `llm.Service.EnabledModels()`. Pickers (`model_sets`, `skills`, `rules`) list ALL defs of the kind,
 drafts included. `validator_rule_codes` = `component.Codes()` (new accessor in
 `internal/features/component/codes.go`).
@@ -102,7 +105,9 @@ When `studio_defs` is empty: model_set `default` (single meta/muse-spark-1.3-con
 Input → Generator → Render → Vision+Code critics → Merge → Gate → Output, gate.continue loop edge
 back to generator.feedback, merge.critique → output.critique), rules `component-format` (cleanups/
 structure/CSS groups referencing validator codes). All published, note "seeded",
-published_by "system". Idempotent by emptiness.
+published_by "system". Idempotent by emptiness. Plus `vision-judge` and `canvas-chat`
+(the design-chat agent, `defaults_chat.go`), both also ensured on every start of an
+already-seeded install (`ensureJudge`, `ensureChatAgent`) — 6 seeded agents.
 
 ## Providers (`internal/features/llm`)
 
@@ -203,7 +208,8 @@ for studio/settings pages can now be pointed at the real API.
   `parseComponentSet` accepts it with ≥ 1 item when hinted (≥ 2 otherwise) → `NodeResult.Folder/
   Names` (2026-11-04).
 - `AgentBody.tool_config` (`ToolConfig`): `generate_components{agent_id,max_count}` (agent empty = the
-  calling agent as worker without these tools; max 8, default 5), `pick_best{judge_agent_id}`
+  calling agent as worker without these tools; max 8, default 5), `gen_components{agent_id,max_count}`
+  (agent empty = slug `component-generator`; max 8, default 8), `pick_best{judge_agent_id}`
   (default slug `vision-judge`), `critique_component{critic_agent_id}` (default `vision-critic`).
   `checkAgentRefs` verifies the ids exist.
 - Seeded `component-generator` guidance has a "The canvas" paragraph (/canvas is read-only, never

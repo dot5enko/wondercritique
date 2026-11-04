@@ -41,6 +41,11 @@ export interface StartRunBody {
    * server-side). Omitted = the published pipeline with slug `default`.
    */
   pipeline_id?: string
+  /**
+   * Run one chat agent (slug or id) instead of a pipeline — the design chat
+   * sends `canvas-chat`. Cannot be combined with a pipeline.
+   */
+  agent?: string
   input: Record<string, RunInputValue>
   /**
    * Canvas files or folders (paths, folders expand server-side) the message is
@@ -81,7 +86,13 @@ export interface RunListItem {
   context_paths?: string[]
   /** Canvas folder the results go to (default destination while running). */
   canvas_folder?: string
+  /** `agent` = a chat agent run (Input → Agent), `pipeline` otherwise. */
+  mode?: RunMode
+  /** The chat agent's text answer ("" for pipelines / unfinished runs). */
+  reply?: string
 }
+
+export type RunMode = 'pipeline' | 'agent'
 
 export interface ListRunsParams {
   limit?: number
@@ -237,6 +248,11 @@ export interface Run {
   canvas_notes?: string[]
   /** Canvas files this run committed (still on the canvas). */
   canvas_paths?: string[]
+  mode?: RunMode
+  /** Agent mode: the chat agent's def id. */
+  agent_id?: string
+  /** The chat agent's text answer. */
+  reply?: string
   steps: RunStep[]
   artifacts: Artifact[]
   /** Results in display order: one (the selected artifact) or every component of a multi-component result. */
@@ -296,6 +312,8 @@ export type RunEvent =
       result_artifact_ids?: string[]
       /** Canvas files the run committed. */
       canvas_paths?: string[]
+      /** The chat agent's answer (agent mode). */
+      reply?: string
     }
   | { event: 'run_failed'; run_id: string; error: string }
 

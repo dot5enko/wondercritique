@@ -37,6 +37,8 @@ type fakeAgents struct {
 	slugs   map[string]string // agent def id -> slug
 	calls   map[string][]agentrun.NodeRequest
 	handler func(slug string, n int, req agentrun.NodeRequest) (*agentrun.NodeResult, error)
+	// ctxHandler, when set, wins over handler (agents that use the step's sink).
+	ctxHandler func(ctx context.Context, slug string, n int, req agentrun.NodeRequest) (*agentrun.NodeResult, error)
 }
 
 func (f *fakeAgents) RunNode(ctx context.Context, req agentrun.NodeRequest) (*agentrun.NodeResult, error) {
@@ -45,6 +47,9 @@ func (f *fakeAgents) RunNode(ctx context.Context, req agentrun.NodeRequest) (*ag
 	f.calls[slug] = append(f.calls[slug], req)
 	n := len(f.calls[slug])
 	f.mu.Unlock()
+	if f.ctxHandler != nil {
+		return f.ctxHandler(ctx, slug, n, req)
+	}
 	return f.handler(slug, n, req)
 }
 

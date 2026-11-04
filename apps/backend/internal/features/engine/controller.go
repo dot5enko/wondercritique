@@ -50,13 +50,13 @@ func viewerOf(r *http.Request) Viewer {
 }
 
 type startRequest struct {
-	PipelineVersionID string                     `json:"pipeline_version_id"`
-	PipelineID        string                     `json:"pipeline_id"`
+	PipelineVersionID string `json:"pipeline_version_id"`
+	PipelineID        string `json:"pipeline_id"`
 	// Agent (slug or id) runs one chat agent instead of a pipeline.
-	Agent    string `json:"agent"`
-	ThreadID string `json:"thread_id"`
-	IsTest            bool                       `json:"is_test"`
-	Input             map[string]json.RawMessage `json:"input" validate:"required"`
+	Agent    string                     `json:"agent"`
+	ThreadID string                     `json:"thread_id"`
+	IsTest   bool                       `json:"is_test"`
+	Input    map[string]json.RawMessage `json:"input" validate:"required"`
 	// ContextPaths are selected canvas files/folders the message is about.
 	ContextPaths []string `json:"context_paths"`
 }
