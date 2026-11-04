@@ -80,6 +80,10 @@ func outputSection(contract studio.OutputContract) string {
 		return "## Output\n\nRespond by calling submit_critique with a JSON object " +
 			`{"strengths":[...], "issues":[{"severity","code"?,"message","suggestion"?}], "score": 0-10}. ` +
 			"Issue severity is info, warning or error; the score summarizes the overall quality."
+	case "chat":
+		return "## Output\n\nAnswer the user in plain text (markdown). There is no submit tool: your last " +
+			"message is the reply. Components exist only when you create them with gen_components; " +
+			"never paste HTML into the reply instead."
 	case "custom":
 		var b strings.Builder
 		b.WriteString("## Output\n\nRespond by calling submit_fields with the following fields:\n\n")

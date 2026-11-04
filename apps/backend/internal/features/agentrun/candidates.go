@@ -44,6 +44,18 @@ type Sink interface {
 	Event(kind string, payload any)
 	// Activity publishes a short live label of what the step is doing now.
 	Activity(label string)
+	// Component records a component made by gen_components as a result of
+	// the step and returns its artifact id.
+	Component(ctx context.Context, c Component) (id string, err error)
+}
+
+// Component is one result component of a chat agent (gen_components).
+type Component struct {
+	HTML      string
+	Name      string // file name hint ("" = engine default)
+	Folder    string // canvas group hint ("" = the run's folder)
+	Variation string
+	Source    string // the canvas path it is a new version of ("" = new design)
 }
 
 type sinkKey struct{}
@@ -173,7 +185,10 @@ func GenerateCandidates(ctx context.Context, run RunNodeFunc, req GenerateReques
 			if hint != "" {
 				r.Samples["variation"] = hint
 			}
-			r.Extra = append(append([]llm.Block(nil), req.Base.Extra...), llm.TextBlock(variationText(i+1, n, hint)))
+			r.Extra = append([]llm.Block(nil), req.Base.Extra...)
+			if n > 1 || hint != "" {
+				r.Extra = append(r.Extra, llm.TextBlock(variationText(i+1, n, hint)))
+			}
 			if r.Title != "" {
 				r.Title = fmt.Sprintf("%s · candidate %d/%d", r.Title, i+1, n)
 			}

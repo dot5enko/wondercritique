@@ -52,7 +52,9 @@ func viewerOf(r *http.Request) Viewer {
 type startRequest struct {
 	PipelineVersionID string                     `json:"pipeline_version_id"`
 	PipelineID        string                     `json:"pipeline_id"`
-	ThreadID          string                     `json:"thread_id"`
+	// Agent (slug or id) runs one chat agent instead of a pipeline.
+	Agent    string `json:"agent"`
+	ThreadID string `json:"thread_id"`
 	IsTest            bool                       `json:"is_test"`
 	Input             map[string]json.RawMessage `json:"input" validate:"required"`
 	// ContextPaths are selected canvas files/folders the message is about.
@@ -70,6 +72,7 @@ func (c *Controller) start(w http.ResponseWriter, r *http.Request) error {
 		Viewer:            viewerOf(r),
 		PipelineVersionID: req.PipelineVersionID,
 		PipelineID:        req.PipelineID,
+		Agent:             req.Agent,
 		ThreadID:          req.ThreadID,
 		IsTest:            req.IsTest,
 		Input:             req.Input,
@@ -230,6 +233,9 @@ func (e *Engine) terminalFromRun(ctx context.Context, run *models.Run) busEvent 
 			if paths, err := e.Canvas.PathsOfRun(ctx, run.ID); err == nil {
 				fields["canvas_paths"] = paths
 			}
+		}
+		if run.Reply != "" {
+			fields["reply"] = run.Reply
 		}
 	} else {
 		msg := run.Error

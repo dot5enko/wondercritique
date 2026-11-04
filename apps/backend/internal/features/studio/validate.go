@@ -105,7 +105,7 @@ func validateAgentDraft(b AgentBody) error {
 		return invalid("model_set_id is required")
 	}
 	switch b.OutputContract.Type {
-	case "artifact", "critique":
+	case "artifact", "critique", "chat":
 	case "custom":
 		if len(b.OutputContract.FieldsSchema) == 0 {
 			return invalid("output contract custom requires fields_schema")
@@ -114,7 +114,7 @@ func validateAgentDraft(b AgentBody) error {
 			return err
 		}
 	default:
-		return invalidf("output contract type %q must be artifact, critique or custom", b.OutputContract.Type)
+		return invalidf("output contract type %q must be artifact, critique, custom or chat", b.OutputContract.Type)
 	}
 	if b.Limits.MaxSteps < 0 || b.Limits.MaxIterations < 0 {
 		return invalid("limits must be >= 0")
@@ -126,6 +126,9 @@ func validateAgentDraft(b AgentBody) error {
 	}
 	if n := b.GenerateConfig().MaxCount; n < 0 || n > MaxCandidates {
 		return invalidf("tool_config.generate_components.max_count must be between 1 and %d", MaxCandidates)
+	}
+	if n := b.GenConfig().MaxCount; n < 0 || n > MaxCandidates {
+		return invalidf("tool_config.gen_components.max_count must be between 1 and %d", MaxCandidates)
 	}
 	return nil
 }

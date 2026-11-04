@@ -147,6 +147,7 @@ func (c *Controller) checkAgentRefs(ctx context.Context, b AgentBody) error {
 	}
 	for field, id := range map[string]string{
 		"generate_components.agent_id":       b.GenerateConfig().AgentID,
+		"gen_components.agent_id":            b.GenConfig().AgentID,
 		"pick_best.judge_agent_id":           b.PickBestConfig().JudgeAgentID,
 		"critique_component.critic_agent_id": b.CritiqueConfig().CriticAgentID,
 	} {

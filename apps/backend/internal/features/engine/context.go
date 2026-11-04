@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -25,6 +26,7 @@ type canvasRun struct {
 	seed     *portVal            // iteration-1 loop value (nil = nothing to say)
 	selected []models.CanvasFile // context_paths, expanded
 	brief    string
+	history  string // agent mode: the chat so far (the `history` prompt variable)
 }
 
 // text is the canvas context for the `canvas` prompt variable.
@@ -144,6 +146,12 @@ func (e *Engine) buildCanvasSeed(ctx context.Context, run *models.Run, cr *canva
 		}
 	}
 
+	if run.Mode == models.RunModeAgent {
+		fmt.Fprintf(&b, "\n### Where new components go\n\nExisting files are never modified. Components you create with gen_components become NEW files in a new top-level folder %q", run.CanvasFolder)
+		b.WriteString(". Pass gen_components `folder` (a short name for the new group), `names` (one per component) and, ")
+		b.WriteString("to build on existing components, `sources` (their canvas paths).\n")
+		return &portVal{Text: b.String()}
+	}
 	fmt.Fprintf(&b, "\n### Where your result goes\n\nNever modify existing files. Your result becomes NEW files in a new top-level folder %q", run.CanvasFolder)
 	if len(cr.selected) > 0 {
 		b.WriteString(" (its own group, apart from the selected components)")
@@ -152,6 +160,65 @@ func (e *Engine) buildCanvasSeed(ctx context.Context, run *models.Run, cr *canva
 	b.WriteString("(one short name for the new group; it always becomes a new top-level folder) and `names` ")
 	b.WriteString("(one per component; keep the original file name when you make a new version of one component).\n")
 	return &portVal{Text: b.String()}
+}
+
+const (
+	// maxHistoryMessages is how many earlier messages a chat agent sees.
+	maxHistoryMessages = 12
+	// maxHistoryReply caps one earlier reply in the history.
+	maxHistoryReply = 2000
+)
+
+// buildHistory renders the thread's earlier messages for a chat agent: the
+// user's text, the reply and the files the message produced (live ones).
+// "" for the first message of a chat.
+func (e *Engine) buildHistory(ctx context.Context, run *models.Run) string {
+	var runs []models.Run
+	if err := e.DB.WithContext(ctx).Where("thread_id = ? AND id <> ?", run.ThreadID, run.ID).
+		Order("created_at ASC, id ASC").Find(&runs).Error; err != nil {
+		e.Log.Warn("engine: chat history", "thread", run.ThreadID, "err", err)
+		return ""
+	}
+	if len(runs) == 0 {
+		return ""
+	}
+	filesOf := map[string][]string{}
+	if e.Canvas != nil {
+		if files, err := e.Canvas.Files(ctx, run.ThreadID); err == nil {
+			for _, f := range files {
+				filesOf[f.RunID] = append(filesOf[f.RunID], f.Path)
+			}
+		}
+	}
+	first := max(0, len(runs)-maxHistoryMessages)
+	var b strings.Builder
+	b.WriteString("## Conversation so far\n")
+	if first > 0 {
+		fmt.Fprintf(&b, "\n(%d earlier messages omitted)\n", first)
+	}
+	for i := first; i < len(runs); i++ {
+		r := &runs[i]
+		var in map[string]any
+		_ = json.Unmarshal(r.Input, &in)
+		fmt.Fprintf(&b, "\n### Message %d\n\nUser: %s\n", i+1, briefOf(in))
+		if len(r.ContextPaths) > 0 {
+			fmt.Fprintf(&b, "(about %s)\n", strings.Join(r.ContextPaths, ", "))
+		}
+		if reply := strings.TrimSpace(r.Reply); reply != "" {
+			fmt.Fprintf(&b, "\nYou: %s\n", truncate(reply, maxHistoryReply))
+		}
+		if paths := filesOf[r.ID]; len(paths) > 0 {
+			fmt.Fprintf(&b, "\nFiles created: %s\n", strings.Join(paths, ", "))
+		}
+		switch r.Status {
+		case models.RunCompleted:
+		case models.RunPending, models.RunRunning:
+			b.WriteString("\n(still in progress)\n")
+		default:
+			fmt.Fprintf(&b, "\n(%s: %s)\n", r.Status, r.Error)
+		}
+	}
+	return b.String()
 }
 
 // messageNumbers maps the thread's run ids to their 1-based message number.
@@ -268,13 +335,17 @@ func (e *Engine) writeFiles(ctx context.Context, b *strings.Builder, files []mod
 
 /* ---------- commit ---------- */
 
-// destHint is the agent's choice of folder / file names for the result.
+// destHint is the agent's choice of folder / file names for the result, plus
+// the canvas file each result is a new version of (gen_components sources).
 type destHint struct {
-	folder string
-	names  []string
+	folder  string
+	names   []string
+	sources []string
 }
 
-func (d destHint) empty() bool { return d.folder == "" && len(d.names) == 0 }
+func (d destHint) empty() bool {
+	return d.folder == "" && len(d.names) == 0 && strings.Join(d.sources, "") == ""
+}
 
 // commitCanvas turns a completed run's results into canvas files (inside the
 // transaction carried by ctx) and returns their paths.
@@ -304,6 +375,10 @@ func (e *Engine) commitCanvas(ctx context.Context, run *models.Run, st *runState
 	slug := canvas.BriefSlug(cr.brief)
 	items := make([]canvas.CommitItem, len(results))
 	for i, r := range results {
+		source := source
+		if i < len(hint.sources) && hint.sources[i] != "" {
+			source = hint.sources[i]
+		}
 		name := ""
 		switch {
 		case i < len(hint.names) && strings.TrimSpace(hint.names[i]) != "":

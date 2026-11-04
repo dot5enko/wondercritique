@@ -49,6 +49,14 @@ type runState struct {
 	final     *iterRecord
 	lastIter  int
 	lastDest  destHint // the latest destination hint of any iteration
+	reply     string   // the latest chat-agent reply
+}
+
+// setReply records a chat agent's answer as the run's reply.
+func (st *runState) setReply(text string) {
+	st.mu.Lock()
+	st.reply = strings.TrimSpace(text)
+	st.mu.Unlock()
 }
 
 func newRunState(e *Engine, run *models.Run, g *graph, input map[string]any, cr *canvasRun) *runState {
@@ -451,6 +459,7 @@ func (st *runState) fillRun(run *models.Run) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	run.Usage = st.usage
+	run.Reply = st.reply
 	if st.costKnown {
 		c := st.cost
 		run.Cost = &c

@@ -127,6 +127,8 @@ func (r *Runtime) buildTools(res *resolvedBody) (*tool.Set, error) {
 			set.Add(validateComponentTool())
 		case "generate_components":
 			set.Add(env.generateTool())
+		case "gen_components":
+			set.Add(env.genTool())
 		case "pick_best":
 			set.Add(env.pickBestTool())
 		case "critique_component":

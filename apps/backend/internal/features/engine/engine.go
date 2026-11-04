@@ -226,7 +226,7 @@ func (e *Engine) finish(run *models.Run, st *runState, runErr error) {
 	}
 	// A struct update with Select applies the usage serializer (map updates would not).
 	if err := e.DB.WithContext(bg).Model(&models.Run{}).Where("id = ?", run.ID).
-		Select("Status", "Error", "FinishedAt", "Iteration", "BestArtifactID", "BestScore", "Usage", "Cost", "CanvasFolder").
+		Select("Status", "Error", "FinishedAt", "Iteration", "BestArtifactID", "BestScore", "Usage", "Cost", "CanvasFolder", "Reply").
 		Updates(run).Error; err != nil {
 		e.Log.Error("engine: persist run outcome", "run", run.ID, "err", err)
 	}
@@ -247,6 +247,9 @@ func (e *Engine) finish(run *models.Run, st *runState, runErr error) {
 			fields["result_artifact_ids"] = ids
 		}
 		fields["canvas_paths"] = nonNil(canvasPaths)
+		if run.Reply != "" {
+			fields["reply"] = run.Reply
+		}
 		e.bus.publish(run.ID, "run_completed", fields)
 	} else {
 		msg := run.Error

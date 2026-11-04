@@ -183,6 +183,9 @@ func (nr *nodeRun) samples() map[string]any {
 	if text := nr.st.canvas.text(); text != "" {
 		samples["canvas"] = text
 	}
+	if h := nr.st.canvas.history; h != "" {
+		samples["history"] = h
+	}
 	for port, vals := range nr.inputs {
 		text, images := combine(vals)
 		if len(images) > 0 && text == "" {
@@ -278,6 +281,20 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 		nr.it.agentScores = append(nr.it.agentScores, score)
 		nr.it.mu.Unlock()
 		res.output = jsonOut(out.Critique)
+	case "chat":
+		// A chat agent: its text is the reply; every component it made with
+		// gen_components is a result (nothing is reduced to one).
+		items, dest := sink.componentList()
+		nr.st.setDest(nr.it, dest)
+		if len(items) > 0 {
+			nr.it.mu.Lock()
+			nr.it.items = items
+			nr.it.mu.Unlock()
+			res.ports["candidates"] = &portVal{Items: items}
+		}
+		nr.st.setReply(out.Text)
+		res.ports["output"] = &portVal{Text: out.Text}
+		res.output = jsonOut(map[string]any{"reply": out.Text, "items": itemsOut(items), "tools": sink.eventList()})
 	case "custom":
 		if _, err := nr.artifact(ctx, models.ArtifactJSON, out.Fields, "application/json", nil); err != nil {
 			return res, err
@@ -390,9 +407,42 @@ type stepSink struct {
 	cost      float64
 	costKnown bool
 	events    []map[string]any
+	comps     []*candidate // gen_components results, in creation order
+	dest      destHint     // their folder / names / sources, aligned with comps
 }
 
 var _ agentrun.Sink = (*stepSink)(nil)
+
+func (s *stepSink) Component(ctx context.Context, c agentrun.Component) (string, error) {
+	a, err := s.nr.artifact(ctx, models.ArtifactHTML, []byte(c.HTML), "text/html; charset=utf-8", nil)
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.comps = append(s.comps, &candidate{nodeID: s.nr.node.ID, artifactID: a.ID, html: c.HTML, variation: c.Variation})
+	if s.dest.folder == "" {
+		s.dest.folder = c.Folder
+	}
+	s.dest.names = append(s.dest.names, c.Name)
+	s.dest.sources = append(s.dest.sources, c.Source)
+	return a.ID, nil
+}
+
+// componentList is what gen_components produced during the step.
+func (s *stepSink) componentList() ([]*candidate, destHint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := destHint{folder: s.dest.folder}
+	for i := range s.comps {
+		d.names = append(d.names, s.dest.names[i])
+		d.sources = append(d.sources, s.dest.sources[i])
+	}
+	if strings.Join(d.names, "") == "" {
+		d.names = nil
+	}
+	return append([]*candidate(nil), s.comps...), d
+}
 
 func (s *stepSink) Artifact(ctx context.Context, kind, mime string, data []byte, score *float64) (string, error) {
 	a, err := s.nr.artifact(ctx, kind, data, mime, score)

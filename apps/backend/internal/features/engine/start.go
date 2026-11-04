@@ -30,7 +30,9 @@ type StartParams struct {
 	Viewer
 	PipelineVersionID string
 	PipelineID        string
-	ThreadID          string
+	// Agent (id or slug) runs one chat agent instead of a pipeline.
+	Agent    string
+	ThreadID string
 	IsTest            bool
 	// Input values are JSON strings or {"artifact_id": "..."} objects.
 	Input map[string]json.RawMessage
@@ -52,12 +54,27 @@ func (e *Engine) Start(ctx context.Context, p StartParams) (*models.Run, error) 
 	if p.IsTest && !p.Admin {
 		return nil, apperr.Forbidden("test runs are limited to admins")
 	}
-	def, ver, body, err := e.resolvePipeline(ctx, p)
-	if err != nil {
-		return nil, err
-	}
-	if issues := e.validatePipeline(ctx, body); len(issues) > 0 {
-		return nil, apperr.Invalid("the pipeline is invalid: "+strings.Join(issues, "; "), nil)
+	var (
+		def   *models.StudioDef // the pipeline (pipeline mode)
+		ver   *models.StudioDefVersion
+		agent *models.StudioDef // the chat agent (agent mode)
+		body  studio.PipelineBody
+		err   error
+	)
+	if p.Agent != "" {
+		if p.PipelineID != "" || p.PipelineVersionID != "" {
+			return nil, apperr.Invalid("pass either agent or a pipeline", map[string]string{"agent": "cannot be combined with a pipeline"})
+		}
+		if agent, body, err = e.resolveChatAgent(ctx, p); err != nil {
+			return nil, err
+		}
+	} else {
+		if def, ver, body, err = e.resolvePipeline(ctx, p); err != nil {
+			return nil, err
+		}
+		if issues := e.validatePipeline(ctx, body); len(issues) > 0 {
+			return nil, apperr.Invalid("the pipeline is invalid: "+strings.Join(issues, "; "), nil)
+		}
 	}
 	g, err := buildGraph(body)
 	if err != nil {
@@ -69,14 +86,17 @@ func (e *Engine) Start(ctx context.Context, p StartParams) (*models.Run, error) 
 	}
 
 	run := &models.Run{
-		Base:         models.Base{ID: models.NewID()},
-		OwnerID:      p.UserID,
-		ThreadID:     p.ThreadID,
-		PipelineID:   def.ID,
-		PipelineSlug: def.Slug,
-		PipelineName: def.Name,
-		IsTest:       p.IsTest,
-		Status:       models.RunPending,
+		Base:     models.Base{ID: models.NewID()},
+		OwnerID:  p.UserID,
+		ThreadID: p.ThreadID,
+		Mode:     models.RunModePipeline,
+		IsTest:   p.IsTest,
+		Status:   models.RunPending,
+	}
+	if agent != nil {
+		run.Mode, run.AgentID, run.PipelineName = models.RunModeAgent, agent.ID, agent.Name
+	} else {
+		run.PipelineID, run.PipelineSlug, run.PipelineName = def.ID, def.Slug, def.Name
 	}
 	if p.ThreadID == "" {
 		run.ThreadID = run.ID
@@ -121,6 +141,9 @@ func (e *Engine) Start(ctx context.Context, p StartParams) (*models.Run, error) 
 		return nil, apperr.Internal(fmt.Errorf("engine: create run: %w", err))
 	}
 	cr.seed = e.buildCanvasSeed(ctx, run, cr, notes)
+	if run.Mode == models.RunModeAgent {
+		cr.history = e.buildHistory(ctx, run)
+	}
 	// The background goroutine owns *run from here on; callers get a snapshot.
 	snapshot := *run
 	if err := e.launch(run, g, input, cr); err != nil {
@@ -216,6 +239,41 @@ func (e *Engine) resolvePipeline(ctx context.Context, p StartParams) (*models.St
 		return nil, nil, zero, err
 	}
 	return def, ver, body, nil
+}
+
+// resolveChatAgent resolves the agent of an agent-mode run (id or slug) and
+// synthesizes its graph: Input → Agent. The agent is pinned to its latest
+// published version; admin test runs use its draft.
+func (e *Engine) resolveChatAgent(ctx context.Context, p StartParams) (*models.StudioDef, studio.PipelineBody, error) {
+	var zero studio.PipelineBody
+	def, err := e.Defs.Get(ctx, studio.KindAgent, p.Agent)
+	if err != nil {
+		if def, err = e.Defs.GetBySlug(ctx, studio.KindAgent, p.Agent); err != nil {
+			return nil, zero, apperr.NotFound("agent not found")
+		}
+	}
+	cfg := map[string]any{"label": def.Name, "agent_id": def.ID}
+	draft := p.IsTest && p.Admin && len(def.Draft) > 0 && string(def.Draft) != "null"
+	if !draft {
+		if def.LatestVer == nil {
+			return nil, zero, apperr.Invalid("the agent has no published version", nil)
+		}
+		cfg["agent_version"] = float64(*def.LatestVer)
+	}
+	return def, chatGraph(cfg), nil
+}
+
+// chatGraph is the graph of an agent-mode run: the message goes to one agent.
+func chatGraph(agentCfg map[string]any) studio.PipelineBody {
+	return studio.PipelineBody{
+		Nodes: []studio.PipelineNode{
+			{ID: "input", Type: "input", Config: map[string]any{"label": "Message"}, Position: studio.NodePosition{X: 0, Y: 0}},
+			{ID: "chat", Type: "agent", Config: agentCfg, Position: studio.NodePosition{X: 260, Y: 0}},
+		},
+		Edges: []studio.PipelineEdge{
+			{ID: "input:brief->chat:brief", From: studio.EdgeEndpoint{Node: "input", Port: "brief"}, To: studio.EdgeEndpoint{Node: "chat", Port: "brief"}},
+		},
+	}
 }
 
 /* ---------- input ---------- */

@@ -38,13 +38,25 @@ func (u *TokenUsage) Add(o TokenUsage) {
 	u.ReasoningTokens += o.ReasoningTokens
 }
 
-// Run is one execution of a pipeline for a brief (plan §5).
+// Run modes: a pipeline graph, or one agent talking in the chat (executed as
+// a synthesized Input → Agent graph).
+const (
+	RunModePipeline = "pipeline"
+	RunModeAgent    = "agent"
+)
+
+// Run is one execution of a pipeline (or a chat agent) for a brief (plan §5).
 type Run struct {
 	Base
 	OwnerID  string `gorm:"index;size:64"`
 	ThreadID string `gorm:"index;size:64"` // chat thread; equals the id of the thread's first run
 
-	PipelineID        string `gorm:"size:64"` // studio def id
+	Mode    string `gorm:"size:16"` // RunModePipeline ("" on old rows) | RunModeAgent
+	AgentID string `gorm:"size:64"` // agent mode: the chat agent's def id
+	// Reply is the chat agent's text answer (agent mode).
+	Reply string `gorm:"type:text"`
+
+	PipelineID        string `gorm:"size:64"` // studio def id (agent mode: "")
 	PipelineSlug      string
 	PipelineName      string
 	PipelineVersion   *int            // nil when the run executes a draft

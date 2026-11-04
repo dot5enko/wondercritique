@@ -31,7 +31,7 @@ import (
 const candidateDir = "/work/candidates"
 
 // candidateTools are stripped from worker builds (no recursive fan-out).
-var candidateTools = map[string]bool{"generate_components": true, "pick_best": true, "critique_component": true}
+var candidateTools = map[string]bool{"generate_components": true, "pick_best": true, "critique_component": true, "gen_components": true}
 
 func withoutCandidateTools(tools []string) []string {
 	out := make([]string, 0, len(tools))

@@ -6,7 +6,7 @@
  */
 import { useLayoutEffect, type RefObject } from 'react'
 import { ArrowUp, X } from 'lucide-react'
-import { Button, cx } from '../../../ui'
+import { Button, IconButton, Spinner, cx } from '../../../ui'
 
 export interface ContextChip {
   key: string
@@ -53,7 +53,7 @@ export function Composer({
         {selectMode && (
           <div className="flex items-center gap-2 rounded-full bg-accent-soft py-1 pr-1 pl-3 text-xs text-accent-ink">
             <span className="min-w-0 flex-1">Tap components or groups to add them to the message.</span>
-            <Button size="sm" variant="primary" className="rounded-full" onClick={onDoneSelecting}>
+            <Button size="sm" variant="primary" className="rounded-full!" onClick={onDoneSelecting}>
               Done
             </Button>
           </div>
@@ -98,15 +98,14 @@ export function Composer({
               'max-h-40 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-3 py-1.5 text-[16px] leading-6 text-ink outline-none placeholder:text-ink-3',
             )}
           />
-          <Button
+          <IconButton
             variant="primary"
             size="lg"
-            icon={<ArrowUp />}
-            className="shrink-0 rounded-full"
-            loading={sending}
-            disabled={!value.trim()}
+            label="Send"
+            icon={sending ? <Spinner /> : <ArrowUp />}
+            className="rounded-full!"
+            disabled={sending || !value.trim()}
             onClick={onSend}
-            aria-label="Send"
           />
         </div>
       </div>

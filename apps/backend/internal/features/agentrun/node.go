@@ -414,6 +414,8 @@ func (n *NodeResult) parse() error {
 			return fmt.Errorf("no JSON object found")
 		}
 		n.Fields = json.RawMessage(raw)
+	case "chat":
+		// The reply is the text itself; components came through gen_components.
 	}
 	return nil
 }

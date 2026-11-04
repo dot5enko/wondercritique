@@ -52,7 +52,7 @@ type ModelSetBody struct {
 
 // OutputContract declares what an agent must produce (plan §4.4).
 type OutputContract struct {
-	Type         string          `json:"type"` // artifact | critique | custom
+	Type         string          `json:"type"` // artifact | critique | custom | chat
 	FieldsSchema json.RawMessage `json:"fields_schema,omitempty"`
 }
 
@@ -76,10 +76,13 @@ type AgentBody struct {
 }
 
 // ToolConfig configures the multi-candidate tools (generate_components,
-// pick_best, critique_component). Every field is optional; empty agent ids
-// fall back to the defaults documented per field.
+// pick_best, critique_component) and gen_components. Every field is optional;
+// empty agent ids fall back to the defaults documented per field.
 type ToolConfig struct {
 	GenerateComponents *GenerateToolConfig `json:"generate_components,omitempty"`
+	// GenComponents configures gen_components (agent_id empty = the agent
+	// with slug DefaultWorkerSlug).
+	GenComponents      *GenerateToolConfig `json:"gen_components,omitempty"`
 	PickBest           *PickBestToolConfig `json:"pick_best,omitempty"`
 	CritiqueComponent  *CritiqueToolConfig `json:"critique_component,omitempty"`
 }
@@ -108,12 +111,24 @@ const (
 	DefaultCandidateCount = 5
 	DefaultJudgeSlug      = "vision-judge"
 	DefaultCriticSlug     = "vision-critic"
+	// DefaultWorkerSlug is the generator gen_components runs by default.
+	DefaultWorkerSlug = "component-generator"
+	// ChatAgentSlug is the agent the design chat talks to.
+	ChatAgentSlug = "canvas-chat"
 )
 
 // GenerateConfig returns the generate_components config (never nil).
 func (b AgentBody) GenerateConfig() GenerateToolConfig {
 	if b.ToolConfig != nil && b.ToolConfig.GenerateComponents != nil {
 		return *b.ToolConfig.GenerateComponents
+	}
+	return GenerateToolConfig{}
+}
+
+// GenConfig returns the gen_components config (never nil).
+func (b AgentBody) GenConfig() GenerateToolConfig {
+	if b.ToolConfig != nil && b.ToolConfig.GenComponents != nil {
+		return *b.ToolConfig.GenComponents
 	}
 	return GenerateToolConfig{}
 }

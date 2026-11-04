@@ -273,7 +273,10 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
 - **Composer** (`canvas/Composer.tsx`, restyled 2026-11-04): floating bottom-center card —
   rounded-3xl pill (`p-1.5`, `focus-within:border-accent/60`), chips row (small rounded-full
   chips), auto-growing textarea at 16px (no iOS focus zoom), Enter sends / Shift+Enter newline
-  (IME-safe), circular rounded-full primary Send button (36px, ArrowUp).
+  (IME-safe), circular primary Send `IconButton` (`size="lg"` = square 36px, `rounded-full!`,
+  ArrowUp / Spinner while sending). Note: `cx` doesn't merge classes, so overriding the base
+  `rounded-md` needs the `!` important suffix (Tailwind v4 orders same-property utilities itself).
+  (2026-11-04)
 - Render cost: `FolderGroup`/`PendingCard`/`ComponentFrame` are memoized and the page's callbacks
   are stable (`retry` via a ref), so typing in the composer doesn't re-render groups and selection /
   layout changes don't re-render frames.
