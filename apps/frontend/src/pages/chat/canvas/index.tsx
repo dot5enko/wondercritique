@@ -7,13 +7,17 @@
  * wheel, long press). Tapping a component or a group selects it (Shift/⌘ or
  * "Select more" mode for several); the selection travels with the next
  * message as `context_artifact_ids`, so the agent gets those components' HTML
- * and edits / derives from them. The long-press menu offers canned requests
- * ("Generate variants", …) that simply send a message about the selection.
+ * and edits / derives from them. The long-press menu and the fixed selection
+ * toolbar (right edge) offer canned requests ("Generate variants", …) that
+ * simply send a message about the selection, plus layout actions: groups and
+ * components can be moved / resized by their handles and arranged in a row or
+ * a column (useCanvasLayout, remembered per chat).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import {
   ArrowLeft,
+  Columns3,
   Copy,
   ListChecks,
   ListTree,
@@ -23,6 +27,8 @@ import {
   Moon,
   PenLine,
   Plus,
+  RotateCcw,
+  Rows3,
   Smartphone,
   Sparkles,
   Wand2,
@@ -45,11 +51,13 @@ import { getVersion, listDefs } from '../../../api/studio'
 import { parseInputFields } from '../../runs/NewRunModal'
 import { RunDetailView } from '../../runs/detail'
 import { useThreads } from '../threads'
-import { useViewport, type MenuInfo, type TapInfo } from './useViewport'
+import { useViewport, type HandleInfo, type MenuInfo, type TapInfo } from './useViewport'
 import { RunGroup } from './RunGroup'
 import { ContextMenu, type MenuAction } from './ContextMenu'
+import { SelectionBar } from './SelectionBar'
 import { Composer, type ContextChip } from './Composer'
-import { loadComponentHtml, useComponentHtml } from './ComponentFrame'
+import { loadComponentHtml, RESIZE_LIMITS, useComponentHtml } from './ComponentFrame'
+import { useCanvasLayout, type GroupDir, type Point } from './layout'
 import type { RunComponent } from './useRunLive'
 
 const EXAMPLES = [
@@ -90,6 +98,12 @@ const QUICK_ACTIONS: { key: string; label: string; icon: typeof Sparkles; prompt
 
 /** Screen space kept free around fitted content (top bar, composer). */
 const FIT_INSET = { top: 72, right: 24, bottom: 150, left: 24 }
+
+/** Gaps of "Arrange" (= the flex gaps): components in a row / column, groups. */
+const ARRANGE_GAP = { row: 64, col: 80, group: 160 }
+
+const selectorOf = (key: string): string => `[data-sel="${CSS.escape(key)}"]`
+const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v))
 
 /** Text of a run's message: the pipeline's primary field, else `brief`, else the first text value. */
 function briefOf(input: Record<string, unknown> | undefined, field: string): string {
@@ -148,6 +162,7 @@ export default function CanvasPage() {
   const [statuses, setStatuses] = useState<Record<string, RunStatus>>({})
   const [selection, setSelection] = useState<string[]>([])
   const [selectMode, setSelectMode] = useState(false)
+  const { layout, setPos, setSize, setDir, reset: resetLayout } = useCanvasLayout(threadId)
 
   useEffect(() => {
     setCompsByRun({})
@@ -241,9 +256,102 @@ export default function CanvasPage() {
     setMenu(info)
   }
 
+  /* ---------- handles: move / resize (DOM moved imperatively, committed on release) ---------- */
+
+  const drag = useRef<{ el: HTMLElement; box: HTMLElement | null; from: Point; min: Point } | null>(null)
+  const onHandle = (info: HandleInfo): void => {
+    const { kind, target, phase, dx, dy } = info
+    if (phase === 'start') {
+      const el = worldRef.current?.querySelector<HTMLElement>(selectorOf(target))
+      if (!el) return
+      const box = kind === 'resize' ? el.querySelector<HTMLElement>('[data-frame-box]') : null
+      if (kind === 'resize' && !box) return
+      let off = layout.pos[target] ?? { x: 0, y: 0 }
+      if (target.startsWith('g:') && !free) {
+        // first group move: every group gets its current place as a canvas position
+        const all = groupPlaces()
+        setPos(all)
+        off = all[target] ?? off
+      }
+      drag.current = {
+        el,
+        box,
+        from: box ? { x: box.offsetWidth, y: box.offsetHeight } : off,
+        // components stay inside their group (it grows to the right / bottom)
+        min: target.startsWith('c:') ? { x: off.x - el.offsetLeft, y: off.y - el.offsetTop } : { x: -Infinity, y: -Infinity },
+      }
+      el.dataset.dragging = ''
+      if (!selected.has(target)) setSelection((prev) => (selectMode ? [...prev, target] : [target]))
+      return
+    }
+    const d = drag.current
+    if (!d) return
+    const { el, box, from, min } = d
+    if (box) {
+      const w = clamp(from.x + dx, RESIZE_LIMITS.minW, RESIZE_LIMITS.maxW)
+      const h = clamp(from.y + dy, RESIZE_LIMITS.minH, RESIZE_LIMITS.maxH)
+      if (phase === 'move') {
+        box.style.width = `${w}px`
+        box.style.height = `${h}px`
+      } else if (phase === 'end') {
+        setSize(target.slice(2), { w, h })
+      } else {
+        box.style.width = `${from.x}px`
+        box.style.height = `${from.y}px`
+      }
+    } else {
+      const p = phase === 'cancel' ? from : { x: Math.max(min.x, from.x + dx), y: Math.max(min.y, from.y + dy) }
+      el.style.translate = `${p.x}px ${p.y}px`
+      el.dataset.dx = String(p.x)
+      el.dataset.dy = String(p.y)
+      if (phase === 'end') setPos({ [target]: p })
+    }
+    if (phase === 'end' || phase === 'cancel') {
+      delete el.dataset.dragging
+      drag.current = null
+    }
+  }
+
+  /**
+   * Free layout: once a group was moved / arranged every group has a canvas
+   * position and is absolutely placed (heights changing — runs growing, the
+   * zoom-dependent header — never shift the others).
+   */
+  const free = runs.some((r) => layout.pos[`g:${r.id}`] != null)
+  /** Current canvas position of every group (to switch to the free layout). */
+  const groupPlaces = (): Record<string, Point> => {
+    const out: Record<string, Point> = {}
+    for (const g of Array.from(contentRef.current?.querySelectorAll<HTMLElement>('[data-group]') ?? [])) {
+      const r = rectOf(g)
+      if (r) out[`g:${g.dataset.group}`] = { x: r.x, y: r.y }
+    }
+    return out
+  }
+  // New messages in a free layout go below everything (before paint, no flash at 0,0).
+  useLayoutEffect(() => {
+    if (!free) return
+    const els = Array.from(contentRef.current?.querySelectorAll<HTMLElement>('[data-group]') ?? [])
+    const missing = els.filter((g) => layout.pos[`g:${g.dataset.group}`] == null)
+    if (missing.length === 0) return
+    const placed = els.flatMap((g) => (missing.includes(g) ? [] : [rectOf(g)])).filter((r) => r != null)
+    let y = Math.max(0, ...placed.map((r) => r.y + r.h)) + ARRANGE_GAP.group
+    const x = placed.length > 0 ? Math.min(...placed.map((r) => r.x)) : 0
+    const next: Record<string, Point> = {}
+    for (const g of missing) {
+      next[`g:${g.dataset.group}`] = { x, y }
+      y += g.offsetHeight + ARRANGE_GAP.group
+    }
+    setPos(next)
+  })
+
+  const zoomLabel = useRef<HTMLButtonElement>(null)
   const vp = useViewport(viewportRef, worldRef, {
     onTap,
     onMenu,
+    onHandle,
+    onView: ({ k }) => {
+      if (zoomLabel.current) zoomLabel.current.textContent = `${Math.round(k * 100)}%`
+    },
     onInteract: () => {
       autoFit.current = false
     },
@@ -254,7 +362,19 @@ export default function CanvasPage() {
     const r = el ? rectOf(el) : null
     if (r) fitRect({ x: r.x - 40, y: r.y - 40, w: r.w + 80, h: r.h + 80 }, FIT_INSET, 1, animate)
   }, [fitRect, rectOf])
-  const fitAll = useCallback(() => fitElement(contentRef.current), [fitElement])
+  /** Union of every group (moved groups included — they don't size the content box). */
+  const fitAll = useCallback(() => {
+    const groups = contentRef.current?.querySelectorAll<HTMLElement>('[data-group]') ?? []
+    let u: { x: number; y: number; r: number; b: number } | null = null
+    for (const g of Array.from(groups)) {
+      const r = rectOf(g)
+      if (!r) continue
+      u = u
+        ? { x: Math.min(u.x, r.x), y: Math.min(u.y, r.y), r: Math.max(u.r, r.x + r.w), b: Math.max(u.b, r.y + r.h) }
+        : { x: r.x, y: r.y, r: r.x + r.w, b: r.y + r.h }
+    }
+    if (u) fitRect({ x: u.x - 40, y: u.y - 40, w: u.r - u.x + 80, h: u.b - u.y + 80 }, FIT_INSET, 1, true)
+  }, [fitRect, rectOf])
   const fitLatest = useCallback((animate = true) => {
     const groups = contentRef.current?.querySelectorAll<HTMLElement>('[data-group]')
     fitElement(groups && groups.length > 0 ? groups[groups.length - 1] : null, animate)
@@ -266,14 +386,25 @@ export default function CanvasPage() {
     const el = contentRef.current
     if (!el) return
     let first = true
+    let raf = 0
+    // frames report sizes in bursts: refit at most once per frame
     const ro = new ResizeObserver(() => {
-      if (!autoFit.current) return
-      fitLatest(!first)
-      first = false
+      if (raf || !autoFit.current) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        if (!autoFit.current) return
+        fitLatest(!first)
+        first = false
+      })
     })
     ro.observe(el)
-    return () => ro.disconnect()
-  }, [fitLatest])
+    // groups too: in the free layout they don't size the content box
+    for (const g of Array.from(el.querySelectorAll('[data-group]'))) ro.observe(g)
+    return () => {
+      ro.disconnect()
+      cancelAnimationFrame(raf)
+    }
+  }, [fitLatest, runs])
   useEffect(() => {
     autoFit.current = true
   }, [threadId])
@@ -320,7 +451,100 @@ export default function CanvasPage() {
     }
   }
   const sendWithSelection = (message: string): void => void send(message, expand(selection))
-  const retry = (run: Run): void => void send(briefOf(run.input, field), run.context_artifact_ids ?? [])
+  const retryRef = useRef<(run: Run) => void>(() => {})
+  retryRef.current = (run) => void send(briefOf(run.input, field), run.context_artifact_ids ?? [])
+  // stable, so the memoized groups don't re-render on every keystroke
+  const retry = useCallback((run: Run) => retryRef.current(run), [])
+
+  /* ---------- layout actions ---------- */
+
+  /**
+   * Offsets that line the given same-level elements up in a row / column,
+   * in their current visual order, starting at their top-left-most corner.
+   */
+  const lineUp = (keys: string[], dir: GroupDir, gap: number, base: Record<string, Point> = layout.pos): Record<string, Point> => {
+    const world = worldRef.current
+    const items = keys.flatMap((k) => {
+      const el = world?.querySelector<HTMLElement>(selectorOf(k))
+      const r = el ? rectOf(el) : null
+      return r ? [{ k, r, off: base[k] ?? { x: 0, y: 0 } }] : []
+    })
+    if (items.length < 2) return {}
+    items.sort((a, b) => (dir === 'col' ? a.r.y - b.r.y || a.r.x - b.r.x : a.r.x - b.r.x || a.r.y - b.r.y))
+    const x0 = Math.min(...items.map((i) => i.r.x))
+    const y0 = Math.min(...items.map((i) => i.r.y))
+    let cur = dir === 'col' ? y0 : x0
+    const out: Record<string, Point> = {}
+    for (const { k, r, off } of items) {
+      const tx = dir === 'col' ? x0 : cur
+      const ty = dir === 'col' ? cur : y0
+      out[k] = { x: off.x + tx - r.x, y: off.y + ty - r.y }
+      cur += (dir === 'col' ? r.h : r.w) + gap
+    }
+    return out
+  }
+
+  /** Selected component keys by run. */
+  const compsByRunOf = (keys: string[]): Map<string, string[]> => {
+    const m = new Map<string, string[]>()
+    for (const k of keys) {
+      if (!k.startsWith('c:')) continue
+      const run = runOfKey(k)
+      if (run) m.set(run, [...(m.get(run) ?? []), k])
+    }
+    return m
+  }
+
+  const groupKeys = selection.filter((k) => k.startsWith('g:'))
+  const canArrange = groupKeys.length > 0 || [...compsByRunOf(selection).values()].some((ks) => ks.length > 1)
+
+  /**
+   * One group → its components flow as a row / column. Several groups → the
+   * groups line up. Several components of one group → they line up inside it
+   * (all of them → the group's flow changes instead).
+   */
+  const arrange = (dir: GroupDir): void => {
+    autoFit.current = false
+    const next: Record<string, Point | null> = {}
+    const flow = (runId: string): void => {
+      setDir(runId, dir)
+      for (const c of compsByRun[runId] ?? []) next[`c:${c.id}`] = null
+    }
+    if (groupKeys.length === 1) flow(groupKeys[0].slice(2))
+    else if (groupKeys.length > 1) {
+      const base = free ? layout.pos : groupPlaces()
+      Object.assign(next, free ? {} : base, lineUp(groupKeys, dir, ARRANGE_GAP.group, base))
+    }
+    for (const [runId, keys] of compsByRunOf(selection)) {
+      if (groupKeys.includes(`g:${runId}`) || keys.length < 2) continue
+      if (keys.length === (compsByRun[runId] ?? []).length) flow(runId)
+      else Object.assign(next, lineUp(keys, dir, ARRANGE_GAP[dir]))
+    }
+    setPos(next)
+  }
+
+  /**
+   * Selection back to the automatic layout: a component's offset and size; a
+   * group's flow and its components (its canvas position stays — "Reset
+   * layout" on the empty canvas restacks everything).
+   */
+  const resetSelectionLayout = (): void => {
+    const next: Record<string, Point | null> = {}
+    for (const k of selection) {
+      if (k.startsWith('c:')) {
+        next[k] = null
+        setSize(k.slice(2), null)
+      } else {
+        setDir(k.slice(2), null)
+        for (const c of compsByRun[k.slice(2)] ?? []) {
+          next[`c:${c.id}`] = null
+          setSize(c.id, null)
+        }
+      }
+    }
+    setPos(next)
+  }
+  const layoutEmpty = Object.keys(layout.pos).length + Object.keys(layout.size).length + Object.keys(layout.dir).length === 0
 
   /* ---------- misc state ---------- */
 
@@ -353,32 +577,42 @@ export default function CanvasPage() {
 
   /* ---------- context menu ---------- */
 
+  const ids = expand(selection)
+  const single = selection.length === 1 && selection[0].startsWith('c:') ? selection[0].slice(2) : null
+  const layoutActions: MenuAction[] = [
+    { key: 'col', label: 'Arrange vertically', icon: Rows3, disabled: !canArrange, onSelect: () => arrange('col') },
+    { key: 'row', label: 'Arrange horizontally', icon: Columns3, disabled: !canArrange, onSelect: () => arrange('row') },
+    { key: 'reset', label: 'Reset position & size', icon: RotateCcw, onSelect: resetSelectionLayout },
+  ]
+  const quickActions: MenuAction[] = QUICK_ACTIONS.map((a) => ({
+    key: a.key,
+    label: a.label,
+    icon: a.icon,
+    disabled: ids.length === 0 || sending,
+    onSelect: () => sendWithSelection(a.prompt(ids.length > 1)),
+  }))
+  const clearAction: MenuAction = { key: 'clear', label: 'Clear selection', icon: X, onSelect: () => { setSelection([]); setSelectMode(false) } }
+
   const menuGroups = (): MenuAction[][] => {
-    const ids = expand(selection)
-    const many = ids.length > 1
-    const single = selection.length === 1 && selection[0].startsWith('c:') ? selection[0].slice(2) : null
     const runId = selection.length === 1 ? runOfKey(selection[0]) : menu?.target ? runOfKey(menu.target) : null
     if (selection.length === 0) {
       return [[
         { key: 'fit', label: 'Fit everything', icon: Maximize, onSelect: () => { autoFit.current = false; fitAll() } },
         { key: 'latest', label: 'Go to latest', icon: Maximize2, disabled: runs.length === 0, onSelect: () => fitLatest() },
         { key: 'write', label: 'New message', icon: PenLine, onSelect: () => inputRef.current?.focus() },
+      ], layoutEmpty ? [] : [
+        { key: 'reset-all', label: 'Reset layout', icon: RotateCcw, onSelect: resetLayout },
       ]]
     }
     return [
-      QUICK_ACTIONS.map((a) => ({
-        key: a.key,
-        label: a.label,
-        icon: a.icon,
-        disabled: ids.length === 0 || sending,
-        onSelect: () => sendWithSelection(a.prompt(many)),
-      })),
+      quickActions,
       [
         { key: 'change', label: 'Describe a change…', icon: PenLine, onSelect: () => inputRef.current?.focus() },
         selectMode
           ? { key: 'done', label: 'Done selecting', icon: ListChecks, onSelect: () => setSelectMode(false) }
           : { key: 'more', label: 'Select more', icon: ListChecks, onSelect: () => setSelectMode(true) },
       ],
+      layoutActions,
       [
         ...(single
           ? [
@@ -396,10 +630,23 @@ export default function CanvasPage() {
             ]
           : []),
         ...(runId ? [{ key: 'details', label: 'Run details', icon: ListTree, onSelect: () => setDetailsRunId(runId) }] : []),
-        { key: 'clear', label: 'Clear selection', icon: X, onSelect: () => { setSelection([]); setSelectMode(false) } },
+        clearAction,
       ],
     ]
   }
+
+  /** The fixed toolbar: layout first, then the canned requests, then single-item actions. */
+  const barRunId = selection.length === 1 ? runOfKey(selection[0]) : null
+  const barGroups: MenuAction[][] = [
+    layoutActions.slice(0, 2),
+    quickActions,
+    [
+      ...(single ? [{ key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewId(single) }] : []),
+      ...(barRunId ? [{ key: 'details', label: 'Run details', icon: ListTree, onSelect: () => setDetailsRunId(barRunId) }] : []),
+      layoutActions[2],
+      clearAction,
+    ],
+  ]
 
   const menuTitle = selection.length === 0
     ? 'Canvas'
@@ -419,7 +666,7 @@ export default function CanvasPage() {
         className="absolute inset-0 touch-none bg-[radial-gradient(circle,var(--color-line-strong)_1px,transparent_1.2px)]"
       >
         <div ref={worldRef} className="absolute top-0 left-0 origin-top-left">
-          <div ref={contentRef} className="flex flex-col items-start gap-40">
+          <div ref={contentRef} className={free ? 'relative' : 'flex flex-col items-start gap-40'}>
             {runs.map((r, i) => (
               <RunGroup
                 key={r.id}
@@ -429,6 +676,11 @@ export default function CanvasPage() {
                 selected={selected.has(`g:${r.id}`)}
                 isSelected={isSelected}
                 labelOf={labelOf}
+                offset={layout.pos[`g:${r.id}`]}
+                free={free}
+                dir={layout.dir[r.id]}
+                pos={layout.pos}
+                sizes={layout.size}
                 onComponents={onComponents}
                 onStatus={onStatus}
                 onRetry={retry}
@@ -445,9 +697,11 @@ export default function CanvasPage() {
           <IconButton icon={<ArrowLeft />} label="All chats" onClick={() => navigate('/chat')} />
           <p className="min-w-0 truncate text-sm font-semibold text-ink">{title}</p>
         </div>
+        <div className="flex shrink-0 flex-col items-end gap-2">
         <div className="pointer-events-auto flex shrink-0 items-center gap-0.5 rounded-xl border border-line bg-surface/95 p-1 shadow-pop backdrop-blur">
           <IconButton icon={<Minus />} label="Zoom out" onClick={() => { autoFit.current = false; zoomBy(0.8, undefined, undefined, true) }} />
           <button
+            ref={zoomLabel}
             type="button"
             onClick={() => {
               autoFit.current = false
@@ -462,10 +716,18 @@ export default function CanvasPage() {
             title="Reset to 100%"
             className="h-8 w-12 cursor-pointer rounded-md text-xs font-medium text-ink-2 tabular-nums outline-none hover:bg-app focus-visible:ring-2 focus-visible:ring-accent/40"
           >
-            {Math.round(vp.zoom * 100)}%
+            100%
           </button>
           <IconButton icon={<Plus />} label="Zoom in" onClick={() => { autoFit.current = false; zoomBy(1.25, undefined, undefined, true) }} />
           <IconButton icon={<Maximize />} label="Fit everything" onClick={() => { autoFit.current = false; fitAll() }} />
+        </div>
+        {selection.length > 0 && (
+          <SelectionBar
+            count={selection.length}
+            groups={barGroups}
+            onMore={(r) => setMenu({ target: null, clientX: r.left - 264, clientY: r.top })}
+          />
+        )}
         </div>
       </div>
 

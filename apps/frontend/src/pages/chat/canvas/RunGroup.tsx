@@ -4,16 +4,28 @@
  * message itself (+ the components it referred to), live progress, Stop /
  * Details and failure handling. The block is selectable as a whole (`g:<run>`)
  * — selecting it means "all its components".
+ *
+ * Layout: components flow in a wrapping row (or a single row / column, see
+ * `dir`); moved components are translated by their offset and the block grows
+ * (padding) to keep them inside. The block itself can be moved on the canvas
+ * by its top-edge handle (then it's absolutely positioned — `free`).
  */
-import { useEffect, useMemo } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Ban, ListTree, RotateCw } from 'lucide-react'
 import { Button, cx } from '../../../ui'
 import { cancelRun, isTerminalRunStatus, type Run, type RunStatus } from '../../../api/runs'
 import { usePipelineBody } from '../../runs/usePipelineBody'
 import { nodeLabel } from '../../runs/shared'
 import { RunProgress } from '../RunProgress'
-import { ComponentFrame, FRAME_WIDTH } from './ComponentFrame'
+import { ComponentFrame, FRAME_WIDTH, FrameHandles } from './ComponentFrame'
 import { componentsOf, useRunLive, type RunComponent } from './useRunLive'
+import type { GroupDir, Point, Size } from './layout'
+
+const COMPONENTS_LAYOUT: Record<GroupDir | 'wrap', string> = {
+  wrap: 'max-w-[5400px] flex-wrap',
+  row: 'flex-nowrap',
+  col: 'flex-col',
+}
 
 /**
  * Canvas chrome (headers, labels) keeps a readable screen size when zoomed out
@@ -21,13 +33,18 @@ import { componentsOf, useRunLive, type RunComponent } from './useRunLive'
  */
 export const CHROME_ZOOM = 'min(4, max(1, var(--inv-k, 1)))'
 
-export function RunGroup({
+export const RunGroup = memo(function RunGroup({
   runId,
   index,
   brief,
   selected,
   isSelected,
   labelOf,
+  offset,
+  free,
+  dir,
+  pos,
+  sizes,
   onComponents,
   onStatus,
   onRetry,
@@ -42,6 +59,14 @@ export function RunGroup({
   isSelected: (componentId: string) => boolean
   /** Canvas label of any component in the chat (for "about 2.1" chips). */
   labelOf: (componentId: string) => string | null
+  /** Canvas offset of the moved group. */
+  offset?: Point
+  /** Absolutely positioned at `offset` (free canvas layout) instead of stacked. */
+  free?: boolean
+  dir?: GroupDir
+  /** Layout maps of the chat (`c:<id>` offsets, manual sizes by id). */
+  pos: Record<string, Point>
+  sizes: Record<string, Size>
   onComponents: (runId: string, components: RunComponent[]) => void
   onStatus: (runId: string, status: RunStatus) => void
   onRetry: (run: Run) => void
@@ -66,16 +91,54 @@ export function RunGroup({
   const running = run != null && !isTerminalRunStatus(run.status)
   const refs = (run?.context_artifact_ids ?? []).map((id) => labelOf(id) ?? '·')
 
+  // Grow the block around moved components (translate doesn't affect layout).
+  const boxRef = useRef<HTMLDivElement>(null)
+  const posKey = components.map((c) => { const p = pos[`c:${c.id}`]; return p ? `${p.x},${p.y}` : '' }).join(';')
+  useLayoutEffect(() => {
+    const box = boxRef.current
+    if (!box) return
+    let raf = 0
+    const fit = (): void => {
+      raf = 0
+      let right = 0
+      let bottom = 0
+      for (const el of Array.from(box.children) as HTMLElement[]) {
+        right = Math.max(right, el.offsetLeft + Number(el.dataset.dx || 0) + el.offsetWidth)
+        bottom = Math.max(bottom, el.offsetTop + Number(el.dataset.dy || 0) + el.offsetHeight)
+      }
+      const pr = parseFloat(box.style.paddingRight || '0')
+      const pb = parseFloat(box.style.paddingBottom || '0')
+      const nr = Math.max(0, Math.ceil(right - (box.clientWidth - pr)))
+      const nb = Math.max(0, Math.ceil(bottom - (box.clientHeight - pb)))
+      if (nr !== pr) box.style.paddingRight = nr ? `${nr}px` : ''
+      if (nb !== pb) box.style.paddingBottom = nb ? `${nb}px` : ''
+    }
+    const schedule = (): void => {
+      if (!raf) raf = requestAnimationFrame(fit)
+    }
+    const ro = new ResizeObserver(schedule)
+    for (const el of Array.from(box.children)) ro.observe(el)
+    schedule()
+    return () => {
+      ro.disconnect()
+      cancelAnimationFrame(raf)
+    }
+  }, [posKey, componentsKey, dir])
+
   return (
     <section
       data-sel={`g:${runId}`}
       data-group={runId}
-      className="inline-flex max-w-[5600px] flex-col gap-8 rounded-[40px] bg-ink/[0.035] p-12"
+      data-dx={offset?.x || undefined}
+      data-dy={offset?.y || undefined}
+      className={cx('group/run inline-flex', free ? 'absolute top-0 left-0 w-max' : 'relative', 'flex-col gap-8 rounded-[40px] bg-ink/[0.035] p-12 data-dragging:z-30', selected && 'z-10')}
       style={{
+        translate: offset ? `${offset.x}px ${offset.y}px` : undefined,
         outline: selected ? 'calc(3px * var(--inv-k, 1)) solid var(--color-accent)' : undefined,
         outlineOffset: 'calc(4px * var(--inv-k, 1))',
       }}
     >
+      <FrameHandles visible={selected} scope="run" resize={false} />
       {/* header: the message + status */}
       <header className="flex max-w-[720px] flex-col gap-2 text-[15px]" style={{ zoom: CHROME_ZOOM }}>
         <div className="flex items-start gap-3">
@@ -126,7 +189,7 @@ export function RunGroup({
       {error != null ? (
         <p className="text-sm text-danger" style={{ zoom: CHROME_ZOOM }}>Couldn't load this message's run.</p>
       ) : components.length > 0 ? (
-        <div className="flex max-w-[5400px] flex-wrap items-start gap-16">
+        <div ref={boxRef} className={cx('relative flex items-start gap-x-16 gap-y-20', COMPONENTS_LAYOUT[dir ?? 'wrap'])}>
           {components.map((c, i) => (
             <ComponentFrame
               key={c.id}
@@ -135,6 +198,9 @@ export function RunGroup({
               score={c.score}
               draft={c.draft}
               selected={selected || isSelected(c.id)}
+              handles={isSelected(c.id)}
+              offset={pos[`c:${c.id}`]}
+              manualSize={sizes[c.id]}
             />
           ))}
         </div>
@@ -143,4 +209,4 @@ export function RunGroup({
       ) : null}
     </section>
   )
-}
+})

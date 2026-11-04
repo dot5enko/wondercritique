@@ -1,6 +1,6 @@
 # Frontend — Studio, Runs, Design chat sections
 
-State as of 2026-11-04 (design chat rebuilt as a full-screen canvas; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
+State as of 2026-11-04 (design chat rebuilt as a full-screen canvas with movable/resizable layout + selection toolbar; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
 (see `docs/frontend.md` for stack/router/API-layer/auth). All data fetching goes through
 `src/api/*`; shared UI from `src/components/*`; forms bound via `useDirtyDraft` with
 debounced autosave to `PUT /studio/{kind}/{id}/draft` and `VersionBar` for publishing.
@@ -139,66 +139,122 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   title = first brief, relative time, message count) → `/chat/<id>`. Nothing else.
 - **Canvas page** (`pages/chat/canvas/index.tsx`): one chat. Model: **message = run = group**,
   **result artifact = component**. Runs of the thread (`listRuns filter[thread_id]`, oldest first)
-  render as `RunGroup`s stacked top→bottom in a world container; DOM flex layout does the placement
-  (no stored positions, no dragging of elements).
-  - Floating chrome: top-left back + chat title, top-right zoom − / % (click = 100%) / + / fit all;
-    bottom `Composer`. Empty new chat → centered explainer card with 3 example prompts.
-  - Auto-fit: a ResizeObserver on the content keeps the **latest group** fitted (insets top 72 /
-    bottom 150) until the user pans/zooms (`autoFit` ref); re-armed after each send and on chat
-    switch. Keys: `+`/`-` zoom, `Shift+1` fit all, `Esc` clears selection.
+  render as `RunGroup`s stacked top→bottom in a world container (flex) until the user moves or
+  arranges a group — then every group gets a canvas position (**free layout**: absolute + `translate`,
+  new messages placed below everything in a layout effect). See "Canvas layout" below.
+  - Floating chrome: top-left back + chat title, top-right zoom − / % (click = 100%; text written
+    imperatively from `onView`, no React state) / + / fit all, under it the **selection toolbar**
+    while something is selected; bottom `Composer`. Empty new chat → centered explainer card with 3 example prompts.
+  - Auto-fit: a ResizeObserver on the content + every group (rAF-coalesced) keeps the **latest
+    group** fitted (insets top 72 / bottom 150) until the user pans/zooms/drags (`autoFit` ref);
+    re-armed after each send and on chat switch. `fitRect` ignores changes < 2% zoom / 6px so
+    frames measuring themselves don't restart the animation. Fit all = union of group rects.
+    Keys: `+`/`-` zoom, `Shift+1` fit all, `Esc` clears selection.
   - Overscroll disabled on `<html>` while mounted; viewport meta has `viewport-fit=cover,
     interactive-widget=resizes-content`; chrome uses `env(safe-area-inset-*)`.
 - **`useViewport`** (`canvas/useViewport.ts`): view `{x,y,k}` in a ref, applied imperatively as a
-  2D `translate() scale()` on the world (no React render per frame; 2D so iframes re-raster
-  crisply); also sets `--inv-k` (1/k) on the world and moves the dotted background. One handler
-  owns every pointer on the viewport (`touch-none`): 1-pointer drag = pan (no element dragging),
-  2 pointers = pinch zoom around the midpoint + pan, wheel = pan, ctrl/⌘+wheel (incl. trackpad
-  pinch) = zoom at cursor, Safari `gesture*` events prevented. Tap → `onTap({target, additive})`;
-  long press (touch/pen, 450 ms, cancelled by >8px movement or a 2nd finger, `vibrate(8)`) or
-  `contextmenu` (right click / Android) → `onMenu`. Targets = nearest `[data-sel]` (`c:<artifactId>`
-  component, `g:<runId>` group); `[data-canvas-ui]` subtrees (group header buttons) keep their own
-  clicks. `rectOf` measures via offset chains (transform/animation-proof); `fitRect`, `zoomBy`,
-  `setView` (optional 220 ms transition). Zoom 5%–400%.
-- **`RunGroup`** (`canvas/RunGroup.tsx`): `<section data-sel="g:<run>" data-group>` transparent
-  rounded block (`bg-ink/[0.035]`, outline when selected — outline widths use `--inv-k` so they
-  stay ~3px on screen). Header = index + message text + "about 1.2, 2.1" (labels of the run's
+  2D `translate() scale()` on the world (no React render per frame) + dotted background; `onView`
+  callback per change. While moving, the world has `will-change: transform` (composite only);
+  **settle** (140 ms after the last change, 260 ms after an animated one) drops it so iframes
+  re-raster crisply, and only then updates `--inv-k` (1/k, rounded) — it restyles/relayouts the
+  zoom-independent chrome, so never per frame. One handler owns every pointer on the viewport
+  (`touch-none`): first pointer down on a `[data-handle="move"|"resize"]` → `onHandle({kind,
+  target (nearest data-sel), phase start|move|end|cancel, dx, dy})` (world units; extra fingers
+  ignored meanwhile); otherwise 1-pointer drag = pan, 2 pointers = pinch zoom around the midpoint
+  + pan, wheel = pan, ctrl/⌘+wheel (incl. trackpad pinch) = zoom at cursor, Safari `gesture*`
+  events prevented. Tap → `onTap({target, additive})`; long press (touch/pen, 450 ms, cancelled
+  by >8px movement or a 2nd finger, `vibrate(8)`) or `contextmenu` (right click / Android) →
+  `onMenu`. Targets = nearest `[data-sel]` (`c:<artifactId>` component, `g:<runId>` group);
+  `[data-canvas-ui]` subtrees (group header buttons) keep their own clicks. `rectOf` measures via
+  offset chains + `data-dx`/`data-dy` (translate of moved elements; transform/animation-proof);
+  `fitRect`, `zoomBy`, `setView` (optional 220 ms transition). Zoom 5%–400%.
+- **`RunGroup`** (`canvas/RunGroup.tsx`, `memo`): `<section data-sel="g:<run>" data-group>`
+  transparent rounded block (`bg-ink/[0.035]`, outline when selected — outline widths use `--inv-k`
+  so they stay ~3px on screen; `absolute w-max` + translate in the free layout; move-handle pill on
+  its top edge). Header = index + message text + "about 1.2, 2.1" (labels of the run's
   `context_artifact_ids`) + `RunProgress` while running + error line + Stop / Try again /
   Reconnect / Details buttons; header and component labels use CSS `zoom: min(4, max(1, --inv-k))`
   (`CHROME_ZOOM`) so they stay readable when zoomed out. Live data via `useRunLive` (getRun + SSE
-  + debounced refetch after step/iteration/terminal events — moved out of the old RunCard).
+  + debounced refetch after step/iteration/terminal events).
   `componentsOf(run)`: `results` (position order) → else completed `best_artifact_id` → else the
   latest iteration's html artifacts as **drafts** (dimmed, "draft" tag). Reports components and
-  status up (`onComponents`, `onStatus`).
-- **`ComponentFrame`** (`canvas/ComponentFrame.tsx`): `[data-sel="c:<id>"]`, label `i.j` (message i,
-  component j) + score, then the HTML in an iframe `sandbox="allow-scripts"` (opaque origin) with
-  `pointer-events-none`. HTML cached per artifact id for the session (`loadComponentHtml`). An
-  injected script postMessages `{__wcFrame, w, h}` (parent checks `e.source`): rendered at 1280px
-  first; if the visible non-full-width boxes span < 75% the frame shrinks once to that width
-  (+ up to 48px margins each side, min 320); height = content bottom (not `scrollHeight`, which
-  never drops below the frame), clamped 64–6000, followed via ResizeObserver + delayed re-measures.
+  status up (`onComponents`, `onStatus`). Components container: wrap (default, `max-w-[5400px]`),
+  `row` (nowrap) or `col` per `layout.dir`; gaps x 64 / y 80. Moved components are translated; a
+  rAF + ResizeObserver layout effect pads the container right/bottom so the block encloses them.
+- **`ComponentFrame`** (`canvas/ComponentFrame.tsx`, `memo`): `[data-sel="c:<id>"]`, label `i.j`
+  (message i, component j) + score — **absolutely positioned above the box** (`bottom-full`, 28px
+  reserved by `mt-7`, grows upward when zoomed out) so zooming never changes the layout — then the
+  box `[data-frame-box]` (size = manual size ?? measured) with the HTML in an iframe
+  `sandbox="allow-scripts"` (opaque origin), `pointer-events-none`, inside a `contain: strict`
+  clipper. HTML cached per artifact id for the session (`loadComponentHtml`). An injected script
+  postMessages `{__wcFrame, w, h}` (parent checks `e.source`; measures at most once per rAF, posts
+  only on change): rendered at 1280px first; if the visible non-full-width boxes span < 75% the
+  frame shrinks once to that width (+ up to 48px margins each side, min 320); height = content
+  bottom (not `scrollHeight`, which never drops below the frame), clamped 64–6000, followed via
+  ResizeObserver + delayed re-measures.
+  - **Lazy boot**: the iframe is created only once an IntersectionObserver (screen root,
+    `rootMargin 50%`; sees the canvas transform) reports the frame near the screen, then through a
+    module-level boot queue (`BOOT_CONCURRENCY = 2`; slot freed on the first size report or after
+    1.5 s), so many heavy hero blocks don't parse/lay out at once. Mounted frames stay mounted.
+  - Handles (`FrameHandles`, also used by groups): pill straddling the top edge (move) and grip in
+    the bottom-right corner (resize; components only), `CHROME_ZOOM`-sized, visible while the
+    element itself is selected (a selected group doesn't show its components' handles) and on
+    hover with fine pointers (`group-hover/frame|run`).
 - **Selection**: ordered keys (`c:`/`g:`). Tap = select only it (tap again = deselect), Shift/⌘/Ctrl
   or "Select more" mode (banner in the composer with Done) = toggle; tap on empty canvas clears
-  (not in select mode). Long press on an unselected target selects it (adds in select mode).
-  Selection shows as removable chips in the composer ("1.2", "Group 3"); sending expands groups to
-  their component ids → `startRun({input:{[field]: text}, thread_id?, context_artifact_ids})`
-  (max 12; see `docs/backend.engine.md` "Selected components"). `field` = default pipeline's first
-  non-image input field (admin-only lookup) else `brief`. Sending is allowed while other runs are
-  still going (each message is its own group); the first message of `/chat/new` navigates
-  (replace) to `/chat/<thread>`.
+  (not in select mode). Long press on an unselected target selects it (adds in select mode);
+  starting a handle drag selects too. Selection shows as removable chips in the composer ("1.2",
+  "Group 3"); sending expands groups to their component ids → `startRun({input:{[field]: text},
+  thread_id?, context_artifact_ids})` (max 12; see `docs/backend.engine.md` "Selected
+  components"). `field` = default pipeline's first non-image input field (admin-only lookup) else
+  `brief`. Sending is allowed while other runs are still going (each message is its own group);
+  the first message of `/chat/new` navigates (replace) to `/chat/<thread>`.
 - **Context menu** (`canvas/ContextMenu.tsx`, fixed at the press point, clamped/flipped, touch rows
   `pointer-coarse:h-11`): with a selection — quick requests that **just send a message** about the
-  selection (Generate variants, Improve the design, Adapt for mobile, Dark version — `QUICK_ACTIONS`),
-  Describe a change… (focuses the composer), Select more / Done selecting, Open preview + Copy HTML
-  (single component), Run details (drawer with `RunDetailView`), Clear selection. On empty canvas:
-  Fit everything, Go to latest, New message.
+  selection (Generate variants, Improve the design, Adapt for mobile, Dark version —
+  `QUICK_ACTIONS`), Describe a change… (focuses the composer), Select more / Done selecting,
+  Arrange vertically / horizontally / Reset position & size, Open preview + Copy HTML (single
+  component), Run details (drawer with `RunDetailView`), Clear selection. On empty canvas: Fit
+  everything, Go to latest, New message, Reset layout (when anything is customised).
+- **Selection toolbar** (`canvas/SelectionBar.tsx`): fixed vertical icon bar under the zoom
+  controls while the selection is non-empty (count badge; scrolls when taller than
+  `100dvh-240px`): Arrange vertically / horizontally, the 4 quick actions, Open preview (single
+  component), Run details (single), Reset position & size, Clear, More (opens the context menu
+  next to it). Same `MenuAction` objects as the menu.
 - **Composer** (`canvas/Composer.tsx`): floating bottom-center card, chips row, auto-growing textarea
   at 16px (no iOS focus zoom), Enter sends / Shift+Enter newline (IME-safe), Send button.
+- Render cost: `RunGroup`/`ComponentFrame` are memoized and the page's callbacks to them are
+  stable (`retry` via a ref), so typing in the composer or selection changes don't re-render frames.
 - Smoke (2026-11-04): `tmp/canvas-smoke/smoke.mjs <dist> <out>` — playwright-core (installed in
   `tmp/canvas-smoke`) drives `/usr/bin/google-chrome` headless as a touch tablet (820×1180), serving
   `apps/frontend/dist` and a stubbed `/api/v1` purely through `context.route` (no dev server, no
-  backend); touch gestures via CDP `Input.dispatchTouchEvent`. Covers list, legacy redirect, frame
-  shrink/height, context refs, tap select, long-press menu, select-more, pinch zoom, pan, quick
-  action payload, group selection expansion, new chat, zero console errors.
+  backend); touch gestures via CDP `Input.dispatchTouchEvent`. 31 checks: list, legacy redirect,
+  frame shrink/height, context refs, tap select, long-press menu, select-more, pinch zoom, pan,
+  quick action payload, group selection expansion, handles (hidden unselected, move/resize stored,
+  group grows), toolbar, arrange (group vertical, groups horizontal), reset, group move → free
+  layout, new chat, zero console errors. (The stub returns run id `R3` for every POST, so later
+  sends overlap on screen — stub artifact.)
+
+### Canvas layout (2026-11-04)
+
+`canvas/layout.ts` `useCanvasLayout(threadId)` — user layout on top of the flex layout, per thread
+in localStorage `wc-canvas-layout:<threadId>` (removed when empty; a `/chat/new` layout carries
+over to the created thread):
+- `pos[key]` = CSS `translate`. `c:<id>`: offset from the component's flow place (clamped so it
+  stays right/below its group's origin; zero offsets dropped). `g:<run>`: absolute canvas position
+  (kept even at 0,0). Any `g:` entry ⇒ free layout; the first group move/arrange stores every
+  group's current place first (`groupPlaces`), so nothing jumps; groups then never shift when
+  another changes height.
+- `size[id]` = manual frame size from the resize handle (240–2560 × 64–6000, overrides measuring).
+- `dir[runId]` = `row` | `col` flow of a group's components (default wrap).
+- Drags are imperative (page `onHandle`: `translate` + `data-dx/dy`, or box width/height;
+  `data-dragging` → z-30) and committed to the layout on release (`cancel` restores).
+- **Arrange** (`arrange(dir)` in the page): one group → its `dir`, its component offsets cleared;
+  several groups → lined up (`lineUp`: current visual order, from the top-left-most corner, gap
+  160); ≥ 2 components of a group → lined up inside it (gap 64 row / 80 col); all of a group's
+  components → its `dir`. Disabled unless one of these applies.
+- Reset position & size: components → offset + size; groups → `dir` + their components (the
+  group's canvas place stays). Empty-canvas "Reset layout" clears everything (back to the stack).
 
 **Layout width (2026-11-02).** `pages/shell.tsx` wraps the Outlet of all settings/studio pages in a `max-w-[1100px]` centered column; only the pipeline graph editor (`/studio/pipelines?id=`) is full-bleed. Pages must not set their own wider max-width. `Modal` sizes: sm/md/lg/xl (xl = `max-w-5xl`).
 

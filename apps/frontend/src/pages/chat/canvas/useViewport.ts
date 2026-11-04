@@ -3,17 +3,24 @@
  *
  * The view (`x`, `y` = screen offset of the world origin, `k` = zoom) lives in
  * a ref and is applied imperatively to the world element's transform, so a
- * gesture never re-renders React. `zoom` state is only for the % readout.
+ * gesture never re-renders React (`onView` gets every change, e.g. for the %
+ * readout). While the view moves the world is a promoted layer (`will-change`)
+ * so frames are only composited; ~140 ms after it stops ("settle") the layer is
+ * dropped (iframes re-raster crisply at the new scale) and `--inv-k` (1/k, used
+ * by the zoom-independent chrome) is updated — never per frame, since it
+ * restyles and re-lays out the whole world.
  *
  * Gestures (all on the viewport element; the hook owns every pointer):
- *  - one pointer drag → pan (touch, pen and mouse; there is no element dragging)
+ *  - one pointer drag → pan (touch, pen and mouse)
+ *  - drag on a `[data-handle="move"|"resize"]` element → `onHandle` with the
+ *    world-space delta (element dragging / resizing; the page moves the DOM)
  *  - two pointers → pinch zoom around the midpoint + pan
  *  - wheel → pan; ctrl/⌘+wheel and trackpad pinch (ctrlKey wheel) → zoom at the cursor
  *  - tap → `onTap(target)`; long press (touch/pen, 450 ms) or right click → `onMenu`
  * Targets are the nearest ancestor with `data-sel` (e.g. `c:<artifact>`,
  * `g:<run>`), or null for empty canvas.
  */
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, type RefObject } from 'react'
 
 export interface View {
   x: number
@@ -33,11 +40,22 @@ export interface MenuInfo {
   clientY: number
 }
 
+export interface HandleInfo {
+  kind: 'move' | 'resize'
+  /** `data-sel` of the element the handle belongs to. */
+  target: string
+  phase: 'start' | 'move' | 'end' | 'cancel'
+  /** World-space delta since the start. */
+  dx: number
+  dy: number
+}
+
 export const MIN_ZOOM = 0.05
 export const MAX_ZOOM = 4
 
 const LONG_PRESS_MS = 450
 const MOVE_SLOP = 8
+const SETTLE_MS = 140
 
 const clampK = (k: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, k))
 
@@ -52,25 +70,37 @@ export function useViewport(
   handlers: {
     onTap: (info: TapInfo) => void
     onMenu: (info: MenuInfo) => void
+    /** Drag of a move / resize handle. */
+    onHandle?: (info: HandleInfo) => void
+    /** Every view change (cheap, imperative consumers only). */
+    onView?: (view: View) => void
     /** Any user pan/zoom (the page stops auto-fitting after it). */
     onInteract?: () => void
   },
 ) {
   const view = useRef<View>({ x: 0, y: 0, k: 1 })
-  const [zoom, setZoom] = useState(1)
-  const raf = useRef(0)
+  const settleTimer = useRef(0)
   const h = useRef(handlers)
   h.current = handlers
 
-  const apply = useCallback((animate = false): void => {
+  const settle = useCallback((): void => {
+    settleTimer.current = 0
+    const world = worldRef.current
+    if (!world) return
+    world.style.willChange = ''
+    const inv = String(Math.round(1e4 / view.current.k) / 1e4)
+    if (world.style.getPropertyValue('--inv-k') !== inv) world.style.setProperty('--inv-k', inv)
+  }, [worldRef])
+
+  const apply = useCallback((animate = false, immediate = false): void => {
     const world = worldRef.current
     if (!world) return
     const { x, y, k } = view.current
     world.style.transition = animate ? 'transform 220ms cubic-bezier(.2,.7,.2,1)' : ''
-    // 2D transform (no translate3d / will-change): the browser re-rasterizes
-    // the iframes at the new scale instead of stretching a cached bitmap.
+    // Composite-only while moving; settle() drops the layer so the iframes
+    // re-raster at the final scale instead of staying a stretched bitmap.
+    if (!immediate) world.style.willChange = 'transform'
     world.style.transform = `translate(${x}px, ${y}px) scale(${k})`
-    world.style.setProperty('--inv-k', String(1 / k))
     // dotted canvas background follows the view (coarser dots when zoomed out)
     const vp = viewportRef.current
     if (vp) {
@@ -78,9 +108,11 @@ export function useViewport(
       vp.style.backgroundSize = `${step}px ${step}px`
       vp.style.backgroundPosition = `${x}px ${y}px`
     }
-    cancelAnimationFrame(raf.current)
-    raf.current = requestAnimationFrame(() => setZoom(k))
-  }, [viewportRef, worldRef])
+    window.clearTimeout(settleTimer.current)
+    if (immediate) settle()
+    else settleTimer.current = window.setTimeout(settle, animate ? 260 : SETTLE_MS)
+    h.current.onView?.(view.current)
+  }, [viewportRef, worldRef, settle])
 
   const setView = useCallback((next: View, animate = false): void => {
     view.current = { ...next, k: clampK(next.k) }
@@ -116,17 +148,23 @@ export function useViewport(
     const vh = vp.clientHeight - inset.top - inset.bottom
     if (vw <= 0 || vh <= 0) return
     const k = clampK(Math.min(maxK, vw / rect.w, vh / rect.h))
-    setView({
+    const next = {
       k,
       x: inset.left + (vw - rect.w * k) / 2 - rect.x * k,
       // tall content: align its top instead of centering it
       y: inset.top + Math.max(0, (vh - rect.h * k) / 2) - rect.y * k,
-    }, animate)
+    }
+    // Content that grows a little (frames measuring themselves) must not
+    // restart the view animation over and over.
+    const cur = view.current
+    if (Math.abs(next.k - cur.k) / cur.k < 0.02 && Math.abs(next.x - cur.x) < 6 && Math.abs(next.y - cur.y) < 6) return
+    setView(next, animate)
   }, [setView, viewportRef])
 
   /**
    * World-space rect of an element inside the world, from layout offsets (the
-   * world is the offset parent) — unaffected by the transform, even mid-animation.
+   * world is the offset parent) plus the canvas offsets of moved elements
+   * (`data-dx` / `data-dy`) — unaffected by the view transform, even mid-animation.
    */
   const rectOf = useCallback((el: HTMLElement): { x: number; y: number; w: number; h: number } | null => {
     const world = worldRef.current
@@ -135,8 +173,8 @@ export function useViewport(
     let y = 0
     let node: HTMLElement | null = el
     while (node && node !== world) {
-      x += node.offsetLeft
-      y += node.offsetTop
+      x += node.offsetLeft + Number(node.dataset.dx || 0)
+      y += node.offsetTop + Number(node.dataset.dy || 0)
       node = node.offsetParent as HTMLElement | null
     }
     if (node !== world) return null
@@ -146,7 +184,7 @@ export function useViewport(
   useEffect(() => {
     const vp = viewportRef.current
     if (!vp) return
-    apply()
+    apply(false, true)
 
     const pointers = new Map<number, { x: number; y: number }>()
     let start: { x: number; y: number; vx: number; vy: number; target: string | null; additive: boolean } | null = null
@@ -154,6 +192,7 @@ export function useViewport(
     let pinch: { dist: number; mx: number; my: number; view: View } | null = null
     let pressTimer = 0
     let menuFiredAt = 0
+    let handle: { id: number; kind: 'move' | 'resize'; target: string; x: number; y: number } | null = null
 
     const clearPress = (): void => {
       window.clearTimeout(pressTimer)
@@ -173,6 +212,20 @@ export function useViewport(
       if (e.pointerType === 'mouse' && e.button !== 0) return
       // UI chrome inside the viewport (buttons in group headers) keeps its own clicks.
       if (e.target instanceof Element && e.target.closest('[data-canvas-ui]')) return
+      if (handle) return // one handle drag at a time, extra fingers ignored
+      const hEl = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-handle]') : null
+      const hTarget = hEl ? targetOf(hEl) : null
+      if (hEl && hTarget && pointers.size === 0) {
+        handle = { id: e.pointerId, kind: hEl.dataset.handle === 'resize' ? 'resize' : 'move', target: hTarget, x: e.clientX, y: e.clientY }
+        try {
+          vp.setPointerCapture(e.pointerId)
+        } catch {
+          // pointer already gone
+        }
+        h.current.onInteract?.()
+        h.current.onHandle?.({ kind: handle.kind, target: hTarget, phase: 'start', dx: 0, dy: 0 })
+        return
+      }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
       try {
         vp.setPointerCapture(e.pointerId)
@@ -204,7 +257,16 @@ export function useViewport(
       }
     }
 
+    const handleDelta = (e: PointerEvent): { dx: number; dy: number } => {
+      const k = view.current.k
+      return { dx: (e.clientX - (handle?.x ?? 0)) / k, dy: (e.clientY - (handle?.y ?? 0)) / k }
+    }
+
     const onMove = (e: PointerEvent): void => {
+      if (handle) {
+        if (e.pointerId === handle.id) h.current.onHandle?.({ kind: handle.kind, target: handle.target, phase: 'move', ...handleDelta(e) })
+        return
+      }
       const p = pointers.get(e.pointerId)
       if (!p) return
       p.x = e.clientX
@@ -243,6 +305,14 @@ export function useViewport(
     }
 
     const onUp = (e: PointerEvent): void => {
+      if (handle) {
+        if (e.pointerId !== handle.id) return
+        const phase = e.type === 'pointerup' ? 'end' : 'cancel'
+        const info = { kind: handle.kind, target: handle.target, phase, ...handleDelta(e) } as const
+        handle = null
+        h.current.onHandle?.(info)
+        return
+      }
       if (!pointers.has(e.pointerId)) return
       pointers.delete(e.pointerId)
       clearPress()
@@ -307,9 +377,9 @@ export function useViewport(
       vp.removeEventListener('contextmenu', onContextMenu)
       vp.removeEventListener('gesturestart', prevent)
       vp.removeEventListener('gesturechange', prevent)
-      cancelAnimationFrame(raf.current)
+      window.clearTimeout(settleTimer.current)
     }
   }, [apply, setView, zoomBy, viewportRef, worldRef])
 
-  return { view, zoom, setView, zoomBy, fitRect, rectOf }
+  return { view, setView, zoomBy, fitRect, rectOf }
 }
