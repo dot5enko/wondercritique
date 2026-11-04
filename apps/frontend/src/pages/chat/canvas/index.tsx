@@ -1,18 +1,19 @@
 /**
  * Design canvas — one chat, full screen (`/chat/:threadId`, `/chat/new`).
  *
- * Every message is a pipeline run and renders as a group block (RunGroup)
- * holding the components that run produced; groups stack top to bottom in
- * message order on a pan/zoom canvas (useViewport: pinch, two-finger/drag pan,
- * wheel, long press). Tapping a component or a group selects it (Shift/⌘ or
- * "Select more" mode for several); the selection travels with the next
- * message as `context_artifact_ids`, so the agent gets those components' HTML
- * and edits / derives from them. The long-press menu and the fixed selection
- * toolbar (right edge) offer canned requests ("Generate variants", …) that
- * simply send a message about the selection, plus layout actions: groups and
- * components can be moved / scaled by their handles and arranged in a row or
- * a column (useCanvasLayout, remembered per chat), or deleted — that writes
- * nothing to the chat; the next message carries a `<meta>` note about it.
+ * The canvas is a view of the chat's shared file tree (GET /threads/{id}/canvas):
+ * every folder is a group block (FolderGroup, subfolders nested inside), every
+ * HTML file a component; the agents read the same files under /canvas. Runs
+ * still working on a result show as pending cards in their target folder
+ * (`run.canvas_folder`). Tapping a component or a group selects it (Shift/⌘
+ * or "Select more" mode for several); the selection travels with the next
+ * message as `context_paths`, so the agent gets those files' HTML and writes
+ * new versions next to them (files are never changed in place). The long-press
+ * menu and the floating selection toolbar offer canned requests ("Generate
+ * variants", …) that simply send a message about the selection, plus layout
+ * actions (move / scale handles, arrange in a row / column — stored on the
+ * server, useCanvasLayout), rename / move and delete (undoable; the server
+ * tells the next run about it).
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
@@ -20,6 +21,8 @@ import {
   ArrowLeft,
   Columns3,
   Copy,
+  FolderInput,
+  FolderPen,
   ListChecks,
   ListTree,
   Maximize,
@@ -49,18 +52,28 @@ import {
   type RunListItem,
   type RunStatus,
 } from '../../../api/runs'
+import {
+  baseOf,
+  deleteCanvasPaths,
+  dirOf,
+  getCanvas,
+  joinPath,
+  moveCanvasPath,
+  restoreCanvasOp,
+  type CanvasFile,
+} from '../../../api/canvas'
 import { getVersion, listDefs } from '../../../api/studio'
 import { parseInputFields } from '../../runs/NewRunModal'
 import { RunDetailView } from '../../runs/detail'
 import { useThreads } from '../threads'
 import { useViewport, type HandleInfo, type MenuInfo, type TapInfo } from './useViewport'
-import { RunGroup } from './RunGroup'
+import { FolderGroup, type GroupEnv } from './FolderGroup'
+import { buildTree, filesBelow, folderLabel, indexFolders, topGroups, type FolderNode } from './tree'
 import { ContextMenu, type MenuAction } from './ContextMenu'
 import { SelectionBar } from './SelectionBar'
 import { Composer, type ContextChip } from './Composer'
 import { loadComponentHtml, useComponentHtml } from './ComponentFrame'
 import { hasArrangement, MAX_SCALE, MIN_SCALE, useCanvasLayout, type GroupDir, type Point } from './layout'
-import type { RunComponent } from './useRunLive'
 
 const EXAMPLES = [
   'A pricing section with three tiers, dark theme, rounded cards',
@@ -112,25 +125,22 @@ const TITLE_COLLAPSE_MS = 3500
  */
 const SHOW_ZOOM_CONTROLS = false
 
-/** Deletion notes travel to the agent inside the next message as `<meta>`, never shown on the canvas. */
-const META_RE = /<meta>[\s\S]*?<\/meta>/g
-function withMeta(message: string, notes: string[]): string {
-  if (notes.length === 0) return message
-  return `${message}\n\n<meta>\nThe user deleted these from the canvas since the last message. They are no longer part of the design: don't build on, reference or restore them unless asked.\n${notes.map((n) => `- ${n}`).join('\n')}\n</meta>`
-}
-const short = (t: string, n = 80): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t)
+/** Files one message may be about (the engine's cap on `context_paths`). */
+const MAX_CONTEXT_FILES = 12
 
 const selectorOf = (key: string): string => `[data-sel="${CSS.escape(key)}"]`
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v))
 
 /** Text of a run's message: the pipeline's primary field, else `brief`, else the first text value. */
 function briefOf(input: Record<string, unknown> | undefined, field: string): string {
-  const clean = (x: string): string => x.replace(META_RE, '').trim()
   const v = input?.[field] ?? input?.['brief']
-  if (typeof v === 'string' && clean(v)) return clean(v)
-  for (const x of Object.values(input ?? {})) if (typeof x === 'string' && clean(x) && !x.startsWith('wcblob://')) return clean(x)
+  if (typeof v === 'string' && v.trim()) return v.trim()
+  for (const x of Object.values(input ?? {})) if (typeof x === 'string' && x.trim() && !x.startsWith('wcblob://')) return x.trim()
   return '(message)'
 }
+
+const errorText = (err: unknown, fallback: string): string =>
+  isBackendMissing(err) ? "The canvas backend can't be reached." : err instanceof Error && err.message ? err.message : fallback
 
 /**
  * Input field the message text goes to: the default pipeline's first non-image
@@ -158,11 +168,13 @@ export default function CanvasPage() {
   const field = usePrimaryField()
   const title = threads.find((t) => t.id === threadId)?.title ?? (threadId ? '' : 'New chat')
 
-  /* ---------- the thread's runs (= messages = groups) ---------- */
+  /* ---------- the thread's runs (= messages) ---------- */
 
   const [runs, setRuns] = useState<RunListItem[]>([])
   const [runsError, setRunsError] = useState<unknown>(null)
   const [runsLoading, setRunsLoading] = useState(false)
+  const runsRef = useRef(runs)
+  runsRef.current = runs
 
   const loadRuns = useCallback(async (id: string, signal?: AbortSignal): Promise<void> => {
     setRunsLoading(true)
@@ -177,23 +189,34 @@ export default function CanvasPage() {
     }
   }, [])
 
-  const [compsByRun, setCompsByRun] = useState<Record<string, RunComponent[]>>({})
+  /* ---------- the canvas: the thread's file tree (+ the stored layout) ---------- */
+
+  const [files, setFiles] = useState<CanvasFile[]>([])
+  const [canvasError, setCanvasError] = useState<unknown>(null)
+  const { layout, setPos, setScale, setDir, reset: resetLayout, adopt, flush } = useCanvasLayout(threadId)
+
+  const loadCanvas = useCallback(async (id: string, signal?: AbortSignal): Promise<void> => {
+    try {
+      const c = await getCanvas(id, signal)
+      if (signal?.aborted) return
+      setFiles(c.files)
+      setCanvasError(null)
+      adopt(c.layout)
+    } catch (err: unknown) {
+      if (!signal?.aborted) setCanvasError(err)
+    }
+  }, [adopt])
+
   const [statuses, setStatuses] = useState<Record<string, RunStatus>>({})
   const [selection, setSelection] = useState<string[]>([])
   const [selectMode, setSelectMode] = useState(false)
-  const { layout, setPos, setScale, setDir, remove, restore, clearPending, reset: resetLayout } = useCanvasLayout(threadId)
-  const removed = layout.removed
-  /** A run's components still on the canvas. */
-  const liveComps = useCallback(
-    (runId: string): RunComponent[] => (compsByRun[runId] ?? []).filter((c) => !removed[`c:${c.id}`]),
-    [compsByRun, removed],
-  )
 
   useEffect(() => {
-    setCompsByRun({})
     setStatuses({})
     setSelection([])
     setSelectMode(false)
+    setFiles([])
+    setCanvasError(null)
     if (!threadId) {
       setRuns([])
       setRunsError(null)
@@ -201,15 +224,19 @@ export default function CanvasPage() {
     }
     const ctrl = new AbortController()
     void loadRuns(threadId, ctrl.signal)
+    void loadCanvas(threadId, ctrl.signal)
     return () => ctrl.abort()
-  }, [threadId, loadRuns])
+  }, [threadId, loadRuns, loadCanvas])
 
-  const onComponents = useCallback((runId: string, comps: RunComponent[]) => {
-    setCompsByRun((prev) => ({ ...prev, [runId]: comps }))
-  }, [])
+  /** Live status of a message's run (pending cards report it). A run finishing → its files land in the tree. */
   const onStatus = useCallback((runId: string, status: RunStatus) => {
     setStatuses((prev) => (prev[runId] === status ? prev : { ...prev, [runId]: status }))
-  }, [])
+    const listed = runsRef.current.find((r) => r.id === runId)
+    if (threadId && isTerminalRunStatus(status) && listed && !isTerminalRunStatus(listed.status)) {
+      void loadCanvas(threadId)
+      void loadRuns(threadId)
+    }
+  }, [threadId, loadCanvas, loadRuns])
 
   // The chat list mirrors finished runs without polling.
   const finished = Object.values(statuses).filter(isTerminalRunStatus).length
@@ -218,40 +245,58 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finished])
 
-  /** Canvas labels: component j of message i → `i.j`. */
-  const labels = useMemo(() => {
-    const m = new Map<string, string>()
-    runs.forEach((r, i) => (compsByRun[r.id] ?? []).forEach((c, j) => m.set(c.id, `${i + 1}.${j + 1}`)))
-    return m
-  }, [runs, compsByRun])
-  const labelOf = useCallback((id: string) => labels.get(id) ?? null, [labels])
   const runIndex = useMemo(() => new Map(runs.map((r, i) => [r.id, i + 1])), [runs])
+  const messageOf = useCallback((runId: string) => {
+    const r = runs.find((x) => x.id === runId)
+    return r ? { index: runIndex.get(runId) ?? 0, brief: briefOf(r.input, field) } : null
+  }, [runs, runIndex, field])
+
+  /** Messages without a result on the canvas yet: running, failed or stopped (their pending cards). */
+  const pendingRuns = useMemo(
+    () => runs.filter((r) => (statuses[r.id] ?? r.status) !== 'completed'),
+    [runs, statuses],
+  )
+  const tree = useMemo(
+    () => buildTree(files, pendingRuns.map((r) => ({ id: r.id, folder: r.canvas_folder || '/' }))),
+    [files, pendingRuns],
+  )
+  const groups = useMemo(() => topGroups(tree), [tree])
+  const folders = useMemo(() => indexFolders(tree), [tree])
+  const fileByPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files])
+  const topKeys = useMemo(() => new Set(groups.map((g) => `g:${g.path}`)), [groups])
 
   /* ---------- selection ---------- */
 
   const selected = useMemo(() => new Set(selection), [selection])
-  const isSelected = useCallback((id: string) => selected.has(`c:${id}`), [selected])
 
-  /** Selection keys → component ids (a group = all its components), deduplicated. */
-  const expand = useCallback((keys: string[]): string[] => {
-    const out: string[] = []
+  /** Paths a selection key stands for (the root group = only the files directly under `/`). */
+  const pathsOf = useCallback((key: string): string[] => {
+    const p = key.slice(2)
+    if (key === 'g:/') return tree.files.map((f) => f.path)
+    return key.startsWith('c:') ? (fileByPath.has(p) ? [p] : []) : folders.has(p) ? [p] : []
+  }, [tree, fileByPath, folders])
+
+  /** Selection keys → the files they cover (a group = every file below it), deduplicated. */
+  const expand = useCallback((keys: string[]): CanvasFile[] => {
+    const out = new Map<string, CanvasFile>()
     for (const k of keys) {
-      const ids = k.startsWith('g:') ? liveComps(k.slice(2)).map((c) => c.id) : k.startsWith('c:') ? [k.slice(2)] : []
-      for (const id of ids) if (!out.includes(id) && !removed[`c:${id}`]) out.push(id)
+      const p = k.slice(2)
+      const list = k === 'g:/' ? tree.files : k.startsWith('g:') ? (folders.get(p) ? filesBelow(folders.get(p) as FolderNode) : []) : [fileByPath.get(p)]
+      for (const f of list) if (f) out.set(f.path, f)
     }
-    return out
-  }, [liveComps, removed])
+    return [...out.values()]
+  }, [tree, folders, fileByPath])
 
+  /** The message a key's content comes from (Run details). */
   const runOfKey = useCallback((key: string): string | null => {
-    if (key.startsWith('g:')) return key.slice(2)
-    const id = key.slice(2)
-    for (const [runId, comps] of Object.entries(compsByRun)) if (comps.some((c) => c.id === id)) return runId
-    return null
-  }, [compsByRun])
+    const p = key.slice(2)
+    if (key.startsWith('c:')) return fileByPath.get(p)?.run_id ?? null
+    return folders.get(p)?.firstRun || null
+  }, [fileByPath, folders])
 
   const chips: ContextChip[] = selection.map((k) => ({
     key: k,
-    label: k.startsWith('g:') ? `Group ${runIndex.get(k.slice(2)) ?? ''}` : labels.get(k.slice(2)) ?? 'Component',
+    label: k.startsWith('g:') ? folderLabel(k.slice(2)) : baseOf(k.slice(2)),
   }))
 
   /* ---------- viewport ---------- */
@@ -292,7 +337,7 @@ export default function CanvasPage() {
       const box = kind === 'resize' ? el.querySelector<HTMLElement>('[data-frame-box]') : null
       if (kind === 'resize' && !box) return
       let off = layout.pos[target] ?? { x: 0, y: 0 }
-      if (target.startsWith('g:') && !free) {
+      if (topKeys.has(target) && !free) {
         // first group move: every group gets its current place as a canvas position
         const all = groupPlaces()
         setPos(all)
@@ -338,11 +383,11 @@ export default function CanvasPage() {
   }
 
   /**
-   * Free layout: once a group was moved / arranged every group has a canvas
-   * position and is absolutely placed (heights changing — runs growing, the
-   * zoom-dependent header — never shift the others).
+   * Free layout: once a top-level group was moved / arranged every one has a
+   * canvas position and is absolutely placed (heights changing — results
+   * arriving, the zoom-dependent header — never shift the others).
    */
-  const free = runs.some((r) => layout.pos[`g:${r.id}`] != null)
+  const free = groups.some((g) => layout.pos[`g:${g.path}`] != null)
   /** Current canvas position of every group (to switch to the free layout). */
   const groupPlaces = (): Record<string, Point> => {
     const out: Record<string, Point> = {}
@@ -352,7 +397,7 @@ export default function CanvasPage() {
     }
     return out
   }
-  // New messages in a free layout go below everything (before paint, no flash at 0,0).
+  // New groups in a free layout go below everything (before paint, no flash at 0,0).
   useLayoutEffect(() => {
     if (!free) return
     const els = Array.from(contentRef.current?.querySelectorAll<HTMLElement>('[data-group]') ?? [])
@@ -400,10 +445,19 @@ export default function CanvasPage() {
     }
     if (u) fitRect({ x: u.x - 40, y: u.y - 40, w: u.r - u.x + 80, h: u.b - u.y + 80 }, FIT_INSET, 1, true)
   }, [fitRect, rectOf])
+  /** The group with the newest work: a running message's card, else the newest file. */
+  const latestSel = useMemo((): string | null => {
+    const running = [...pendingRuns].reverse().find((r) => !isTerminalRunStatus(statuses[r.id] ?? r.status))
+    if (running) return `[data-pending="${CSS.escape(running.id)}"]`
+    const newest = files.reduce<CanvasFile | null>((a, f) => (a == null || f.created_at > a.created_at ? f : a), null)
+    return newest ? selectorOf(`c:${newest.path}`) : null
+  }, [pendingRuns, statuses, files])
   const fitLatest = useCallback((animate = true) => {
-    const groups = contentRef.current?.querySelectorAll<HTMLElement>('[data-group]')
-    fitElement(groups && groups.length > 0 ? groups[groups.length - 1] : null, animate)
-  }, [fitElement])
+    const root = contentRef.current
+    const el = latestSel ? root?.querySelector<HTMLElement>(latestSel)?.closest<HTMLElement>('[data-group]') : null
+    const all = root?.querySelectorAll<HTMLElement>('[data-group]')
+    fitElement(el ?? (all && all.length > 0 ? all[all.length - 1] : null), animate)
+  }, [fitElement, latestSel])
 
   // Content grows as frames measure themselves: keep the latest group in view
   // until the user takes over.
@@ -429,7 +483,7 @@ export default function CanvasPage() {
       ro.disconnect()
       cancelAnimationFrame(raf)
     }
-  }, [fitLatest, runs])
+  }, [fitLatest, groups])
   useEffect(() => {
     autoFit.current = true
   }, [threadId])
@@ -444,6 +498,17 @@ export default function CanvasPage() {
     }
   }, [])
 
+  /* ---------- misc state ---------- */
+
+  const [detailsRunId, setDetailsRunId] = useState<string | null>(null)
+  const [previewPath, setPreviewPath] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null)
+  useEffect(() => {
+    if (!notice) return
+    const t = window.setTimeout(() => setNotice(null), notice.undo ? 6000 : 2400)
+    return () => window.clearTimeout(t)
+  }, [notice])
+
   /* ---------- sending ---------- */
 
   const [text, setText] = useState('')
@@ -451,19 +516,24 @@ export default function CanvasPage() {
   const [sendError, setSendError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const send = async (message: string, contextIds: string[]): Promise<void> => {
+  /** Sends a message about `paths` (files / folders of the canvas). */
+  const send = async (message: string, paths: string[]): Promise<void> => {
     const brief = message.trim()
     if (!brief || sending) return
+    const contextPaths = threadId ? [...new Set(paths)] : []
+    const count = expand(contextPaths.map((p) => (fileByPath.has(p) ? `c:${p}` : `g:${p}`))).length
+    if (count > MAX_CONTEXT_FILES) {
+      setSendError(`A message can be about at most ${MAX_CONTEXT_FILES} components (${count} selected).`)
+      return
+    }
     setSending(true)
     setSendError(null)
-    const pendingKeys = Object.keys(layout.pending)
     try {
       const res = await startRun({
-        input: { [field]: withMeta(brief, pendingKeys.map((k) => layout.pending[k])) },
+        input: { [field]: brief },
         ...(threadId ? { thread_id: threadId } : {}),
-        ...(contextIds.length > 0 ? { context_artifact_ids: contextIds.filter((id) => !removed[`c:${id}`]).slice(0, 12) } : {}),
+        ...(contextPaths.length > 0 ? { context_paths: contextPaths } : {}),
       })
-      clearPending(pendingKeys)
       setText('')
       setSelection([])
       setSelectMode(false)
@@ -477,9 +547,9 @@ export default function CanvasPage() {
       setSending(false)
     }
   }
-  const sendWithSelection = (message: string): void => void send(message, expand(selection))
+  const sendWithSelection = (message: string): void => void send(message, selection.flatMap(pathsOf))
   const retryRef = useRef<(run: Run) => void>(() => {})
-  retryRef.current = (run) => void send(briefOf(run.input, field), run.context_artifact_ids ?? [])
+  retryRef.current = (run) => void send(briefOf(run.input, field), (run.context_paths ?? []).filter((p) => fileByPath.has(p)))
   // stable, so the memoized groups don't re-render on every keystroke
   const retry = useCallback((run: Run) => retryRef.current(run), [])
 
@@ -511,45 +581,52 @@ export default function CanvasPage() {
     return out
   }
 
-  /** Selected component keys by run. */
-  const compsByRunOf = (keys: string[]): Map<string, string[]> => {
+  /** The flow items of a folder: its files, then its subfolders. */
+  const itemsOf = (folder: string): string[] => {
+    const n = folders.get(folder)
+    if (!n) return []
+    const subs = folder === '/' ? [] : n.folders.map((f) => `g:${f.path}`)
+    return [...n.files.map((f) => `c:${f.path}`), ...subs]
+  }
+  /** Selected items (components, nested groups) by the folder they flow in. */
+  const itemsByFolder = (keys: string[]): Map<string, string[]> => {
     const m = new Map<string, string[]>()
     for (const k of keys) {
-      if (!k.startsWith('c:')) continue
-      const run = runOfKey(k)
-      if (run) m.set(run, [...(m.get(run) ?? []), k])
+      if (topKeys.has(k)) continue
+      const parent = dirOf(k.slice(2))
+      m.set(parent, [...(m.get(parent) ?? []), k])
     }
     return m
   }
 
   const groupKeys = selection.filter((k) => k.startsWith('g:'))
-  /** Arranging means something: several groups, a group of 2+ components, or 2+ components of one group. */
-  const canArrange = groupKeys.length > 1
-    || (groupKeys.length === 1 && liveComps(groupKeys[0].slice(2)).length > 1)
-    || [...compsByRunOf(selection)].some(([run, ks]) => !groupKeys.includes(`g:${run}`) && ks.length > 1)
+  const topSelected = selection.filter((k) => topKeys.has(k))
+  /** Arranging means something: several groups, a group of 2+ items, or 2+ items of one folder. */
+  const canArrange = topSelected.length > 1
+    || (groupKeys.length === 1 && itemsOf(groupKeys[0].slice(2)).length > 1)
+    || [...itemsByFolder(selection)].some(([folder, ks]) => !selected.has(`g:${folder}`) && ks.length > 1)
 
   /**
-   * One group → its components flow as a row / column. Several groups → the
-   * groups line up. Several components of one group → they line up inside it
-   * (all of them → the group's flow changes instead).
+   * One group → its items flow as a row / column. Several canvas groups → the
+   * groups line up. Several items of one folder → they line up inside it (all
+   * of them → the folder's flow changes instead).
    */
   const arrange = (dir: GroupDir): void => {
     autoFit.current = false
     const next: Record<string, Point | null> = {}
-    const flow = (runId: string): void => {
-      setDir(runId, dir)
-      for (const c of compsByRun[runId] ?? []) next[`c:${c.id}`] = null
+    const flow = (folder: string): void => {
+      setDir(folder, dir)
+      for (const k of itemsOf(folder)) next[k] = null
     }
     if (groupKeys.length === 1) {
-      if (liveComps(groupKeys[0].slice(2)).length > 1) flow(groupKeys[0].slice(2))
-    }
-    else if (groupKeys.length > 1) {
+      if (itemsOf(groupKeys[0].slice(2)).length > 1) flow(groupKeys[0].slice(2))
+    } else if (topSelected.length > 1) {
       const base = free ? layout.pos : groupPlaces()
-      Object.assign(next, free ? {} : base, lineUp(groupKeys, dir, ARRANGE_GAP.group, base))
+      Object.assign(next, free ? {} : base, lineUp(topSelected, dir, ARRANGE_GAP.group, base))
     }
-    for (const [runId, keys] of compsByRunOf(selection)) {
-      if (groupKeys.includes(`g:${runId}`) || keys.length < 2) continue
-      if (keys.length === liveComps(runId).length) flow(runId)
+    for (const [folder, keys] of itemsByFolder(selection)) {
+      if (selected.has(`g:${folder}`) || keys.length < 2) continue
+      if (keys.length === itemsOf(folder).length) flow(folder)
       else Object.assign(next, lineUp(keys, dir, ARRANGE_GAP[dir]))
     }
     setPos(next)
@@ -557,8 +634,8 @@ export default function CanvasPage() {
 
   /**
    * Selection back to the automatic layout: a component's offset and scale; a
-   * group's flow and its components (its canvas position stays — "Reset
-   * layout" on the empty canvas restacks everything).
+   * group's flow and its items (its own place stays — "Reset layout" on the
+   * empty canvas restacks everything).
    */
   const resetSelectionLayout = (): void => {
     const next: Record<string, Point | null> = {}
@@ -568,9 +645,9 @@ export default function CanvasPage() {
         setScale(k.slice(2), null)
       } else {
         setDir(k.slice(2), null)
-        for (const c of compsByRun[k.slice(2)] ?? []) {
-          next[`c:${c.id}`] = null
-          setScale(c.id, null)
+        for (const item of itemsOf(k.slice(2))) {
+          next[item] = null
+          if (item.startsWith('c:')) setScale(item.slice(2), null)
         }
       }
     }
@@ -578,40 +655,63 @@ export default function CanvasPage() {
   }
   const layoutEmpty = !hasArrangement(layout)
 
-  /** What the agent is told about a deleted element. */
-  const removalNote = (k: string): string => {
-    if (k.startsWith('c:')) {
-      const id = k.slice(2)
-      return `component ${labels.get(id) ?? ''} (artifact ${id})`.replace('  ', ' ')
-    }
-    const runId = k.slice(2)
-    const run = runs.find((r) => r.id === runId)
-    const comps = liveComps(runId).map((c) => `${labels.get(c.id) ?? '?'} = artifact ${c.id}`)
-    return `message ${runIndex.get(runId) ?? '?'} "${short(briefOf(run?.input, field))}"${comps.length > 0 ? ` with its components ${comps.join(', ')}` : ''}`
+  /* ---------- file operations (server side; the next message is told about them) ---------- */
+
+  const clearSelection = (): void => {
+    setSelection([])
+    setSelectMode(false)
   }
+  /** Runs a canvas operation with the layout saved first and the tree reloaded after. */
+  const operate = async (fn: (thread: string) => Promise<void>, failure: string): Promise<void> => {
+    if (!threadId) return
+    try {
+      await flush()
+      await fn(threadId)
+    } catch (err: unknown) {
+      setNotice({ text: errorText(err, failure) })
+    } finally {
+      await loadCanvas(threadId)
+    }
+  }
+
   /** Deletes the selection from the canvas (and from every future context); undoable for a moment. */
   const deleteSelection = (): void => {
     const keys = [...selection]
-    if (keys.length === 0) return
-    remove(Object.fromEntries(keys.map((k) => [k, removalNote(k)])))
-    setSelection([])
-    setSelectMode(false)
-    setNotice({
-      text: keys.length === 1 ? (keys[0].startsWith('g:') ? 'Group deleted' : 'Component deleted') : `${keys.length} deleted`,
-      undo: () => restore(keys),
-    })
+    const paths = keys.flatMap(pathsOf)
+    if (paths.length === 0) return
+    clearSelection()
+    void operate(async (thread) => {
+      const { op_id } = await deleteCanvasPaths(thread, paths)
+      setNotice({
+        text: keys.length === 1 ? (keys[0].startsWith('g:') ? 'Group deleted' : 'Component deleted') : `${keys.length} deleted`,
+        undo: () => void operate(async (t) => { await restoreCanvasOp(t, op_id) }, "Couldn't restore"),
+      })
+    }, "Couldn't delete")
   }
 
-  /* ---------- misc state ---------- */
+  /** Renames the selected folder (a move next to itself). */
+  const renameFolder = (): void => {
+    const key = selection[0]
+    if (selection.length !== 1 || !key?.startsWith('g:') || key === 'g:/') return
+    const folder = key.slice(2)
+    const name = window.prompt('Rename folder', baseOf(folder))?.trim()
+    if (!name || name === baseOf(folder)) return
+    clearSelection()
+    void operate(async (thread) => { await moveCanvasPath(thread, folder, joinPath(dirOf(folder), name)) }, "Couldn't rename the folder")
+  }
 
-  const [detailsRunId, setDetailsRunId] = useState<string | null>(null)
-  const [previewId, setPreviewId] = useState<string | null>(null)
-  const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null)
-  useEffect(() => {
-    if (!notice) return
-    const t = window.setTimeout(() => setNotice(null), notice.undo ? 6000 : 1800)
-    return () => window.clearTimeout(t)
-  }, [notice])
+  /** Moves the selected components into another folder (created when new). */
+  const moveToFolder = (): void => {
+    const paths = selection.filter((k) => k.startsWith('c:')).map((k) => k.slice(2))
+    if (paths.length === 0) return
+    const target = window.prompt('Move to folder', dirOf(paths[0]))?.trim()
+    if (target == null || target === '') return
+    const folder = target.startsWith('/') ? target : `/${target}`
+    clearSelection()
+    void operate(async (thread) => {
+      for (const p of paths) if (dirOf(p) !== folder) await moveCanvasPath(thread, p, joinPath(folder, baseOf(p)))
+    }, "Couldn't move")
+  }
 
   // The title shrinks to just the back arrow after a moment (hover shows it again).
   const [titleShort, setTitleShort] = useState(false)
@@ -624,7 +724,7 @@ export default function CanvasPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const typing = e.target instanceof HTMLElement && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')
-      if (e.key === 'Escape' && !menu && !previewId && !detailsRunId) {
+      if (e.key === 'Escape' && !menu && !previewPath && !detailsRunId) {
         setSelection([])
         setSelectMode(false)
       }
@@ -637,12 +737,12 @@ export default function CanvasPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [menu, previewId, detailsRunId, zoomBy, fitAll])
+  }, [menu, previewPath, detailsRunId, zoomBy, fitAll])
 
   /* ---------- context menu ---------- */
 
   const ids = expand(selection)
-  const single = selection.length === 1 && selection[0].startsWith('c:') ? selection[0].slice(2) : null
+  const single = selection.length === 1 && selection[0].startsWith('c:') ? fileByPath.get(selection[0].slice(2)) ?? null : null
   const arrangeActions: MenuAction[] = canArrange
     ? [
         { key: 'col', label: 'Arrange vertically', icon: Rows3, onSelect: () => arrange('col') },
@@ -651,6 +751,14 @@ export default function CanvasPage() {
     : []
   const resetAction: MenuAction = { key: 'reset', label: 'Reset position & size', icon: RotateCcw, onSelect: resetSelectionLayout }
   const deleteAction: MenuAction = { key: 'delete', label: 'Delete from canvas', icon: Trash2, onSelect: deleteSelection }
+  const fileActions: MenuAction[] = [
+    ...(selection.length === 1 && selection[0].startsWith('g:') && selection[0] !== 'g:/'
+      ? [{ key: 'rename', label: 'Rename folder…', icon: FolderPen, onSelect: renameFolder }]
+      : []),
+    ...(selection.length > 0 && selection.every((k) => k.startsWith('c:'))
+      ? [{ key: 'move-to', label: 'Move to folder…', icon: FolderInput, onSelect: moveToFolder }]
+      : []),
+  ]
   const quickActions: MenuAction[] = QUICK_ACTIONS.map((a) => ({
     key: a.key,
     label: a.label,
@@ -658,14 +766,14 @@ export default function CanvasPage() {
     disabled: ids.length === 0 || sending,
     onSelect: () => sendWithSelection(a.prompt(ids.length > 1)),
   }))
-  const clearAction: MenuAction = { key: 'clear', label: 'Clear selection', icon: X, onSelect: () => { setSelection([]); setSelectMode(false) } }
+  const clearAction: MenuAction = { key: 'clear', label: 'Clear selection', icon: X, onSelect: clearSelection }
 
   const menuGroups = (): MenuAction[][] => {
     const runId = selection.length === 1 ? runOfKey(selection[0]) : menu?.target ? runOfKey(menu.target) : null
     if (selection.length === 0) {
       return [[
         { key: 'fit', label: 'Fit everything', icon: Maximize, onSelect: () => { autoFit.current = false; fitAll() } },
-        { key: 'latest', label: 'Go to latest', icon: Maximize2, disabled: runs.length === 0, onSelect: () => fitLatest() },
+        { key: 'latest', label: 'Go to latest', icon: Maximize2, disabled: groups.length === 0, onSelect: () => fitLatest() },
         { key: 'write', label: 'New message', icon: PenLine, onSelect: () => inputRef.current?.focus() },
       ], layoutEmpty ? [] : [
         { key: 'reset-all', label: 'Reset layout', icon: RotateCcw, onSelect: resetLayout },
@@ -679,17 +787,17 @@ export default function CanvasPage() {
           ? { key: 'done', label: 'Done selecting', icon: ListChecks, onSelect: () => setSelectMode(false) }
           : { key: 'more', label: 'Select more', icon: ListChecks, onSelect: () => setSelectMode(true) },
       ],
-      [...arrangeActions, resetAction, deleteAction],
+      [...arrangeActions, resetAction, ...fileActions, deleteAction],
       [
         ...(single
           ? [
-              { key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewId(single) },
+              { key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewPath(single.path) },
               {
                 key: 'copy',
                 label: 'Copy HTML',
                 icon: Copy,
                 onSelect: () => {
-                  void loadComponentHtml(single)
+                  void loadComponentHtml(single.artifact_id)
                     .then((html) => navigator.clipboard.writeText(html))
                     .then(() => setNotice({ text: 'HTML copied' }), () => setNotice({ text: "Couldn't copy" }))
                 },
@@ -708,9 +816,10 @@ export default function CanvasPage() {
     arrangeActions,
     quickActions,
     [
-      ...(single ? [{ key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewId(single) }] : []),
+      ...(single ? [{ key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewPath(single.path) }] : []),
       ...(barRunId ? [{ key: 'details', label: 'Run details', icon: ListTree, onSelect: () => setDetailsRunId(barRunId) }] : []),
       resetAction,
+      ...fileActions,
       deleteAction,
       clearAction,
     ],
@@ -720,9 +829,13 @@ export default function CanvasPage() {
     ? 'Canvas'
     : selection.length === 1
       ? chips[0]?.label
-      : `${selection.length} selected · ${expand(selection).length} components`
+      : `${selection.length} selected · ${ids.length} components`
 
   /* ---------- render ---------- */
+
+  const env = useMemo<GroupEnv>(() => ({
+    selection: selected, layout, messageOf, onDetails: setDetailsRunId, onRetry: retry, onStatus,
+  }), [selected, layout, messageOf, retry, onStatus])
 
   const empty = !threadId && runs.length === 0
 
@@ -735,26 +848,8 @@ export default function CanvasPage() {
       >
         <div ref={worldRef} className="absolute top-0 left-0 origin-top-left">
           <div ref={contentRef} className={free ? 'relative' : 'flex flex-col items-start gap-40'}>
-            {runs.map((r, i) => removed[`g:${r.id}`] ? null : (
-              <RunGroup
-                key={r.id}
-                runId={r.id}
-                index={i + 1}
-                brief={briefOf(r.input, field)}
-                selected={selected.has(`g:${r.id}`)}
-                isSelected={isSelected}
-                labelOf={labelOf}
-                offset={layout.pos[`g:${r.id}`]}
-                free={free}
-                dir={layout.dir[r.id]}
-                pos={layout.pos}
-                scales={layout.scale}
-                removed={removed}
-                onComponents={onComponents}
-                onStatus={onStatus}
-                onRetry={retry}
-                onDetails={setDetailsRunId}
-              />
+            {groups.map((g) => (
+              <FolderGroup key={g.path} node={g} top free={free} env={env} />
             ))}
           </div>
         </div>
@@ -821,7 +916,7 @@ export default function CanvasPage() {
           <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-line bg-surface p-5 shadow-pop">
             <p className="text-sm font-semibold text-ink">Describe what you want designed</p>
             <p className="mt-1 text-xs leading-relaxed text-ink-2">
-              Each message becomes a group on the canvas with the components the agents generate.
+              The agents' designs land on the canvas as component files, grouped in folders.
               Tap a component to select it, long-press for actions, pinch to zoom.
             </p>
             <div className="mt-3 flex flex-col gap-1.5">
@@ -840,6 +935,11 @@ export default function CanvasPage() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+      {threadId && canvasError != null && runsError == null && (
+        <div className="fixed inset-x-0 top-20 z-10 mx-auto w-full max-w-md px-4">
+          <ErrorState error={canvasError} onRetry={() => void loadCanvas(threadId)} />
         </div>
       )}
       {threadId && runsError != null && !runsLoading && (
@@ -887,7 +987,7 @@ export default function CanvasPage() {
         selectMode={selectMode}
         onDoneSelecting={() => setSelectMode(false)}
         inputRef={inputRef}
-        placeholder={selection.length > 0 ? 'What should change in the selection?' : runs.length > 0 ? 'Ask for changes or something new…' : 'Describe what you want designed…'}
+        placeholder={selection.length > 0 ? 'What should change in the selection?' : groups.length > 0 ? 'Ask for changes or something new…' : 'Describe what you want designed…'}
       />
 
       {menu && (
@@ -900,7 +1000,11 @@ export default function CanvasPage() {
         />
       )}
 
-      <PreviewModal id={previewId} label={previewId ? labels.get(previewId) ?? '' : ''} onClose={() => setPreviewId(null)} />
+      <PreviewModal
+        id={previewPath ? fileByPath.get(previewPath)?.artifact_id ?? null : null}
+        label={previewPath ? baseOf(previewPath) : ''}
+        onClose={() => setPreviewPath(null)}
+      />
 
       {detailsRunId && (
         <Drawer onClose={() => setDetailsRunId(null)}>
@@ -919,7 +1023,7 @@ function PreviewModal({ id, label, onClose }: { id: string | null; label: string
       open={id != null}
       onClose={onClose}
       size="xl"
-      title={`Component ${label}`}
+      title={label}
       footer={
         <Button variant="secondary" onClick={onClose}>
           Close
@@ -927,7 +1031,7 @@ function PreviewModal({ id, label, onClose }: { id: string | null; label: string
       }
     >
       {id && html != null ? (
-        <iframe title={`Component ${label}`} srcDoc={html} sandbox="allow-scripts" className="h-[70vh] w-full rounded-lg border border-line bg-white" />
+        <iframe title={label} srcDoc={html} sandbox="allow-scripts" className="h-[70vh] w-full rounded-lg border border-line bg-white" />
       ) : (
         <div className="h-[70vh] w-full animate-pulse rounded-lg bg-app" />
       )}

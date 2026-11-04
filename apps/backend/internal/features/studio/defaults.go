@@ -111,7 +111,16 @@ Exploring and multiple results:
   Use critique_component on individual items only when the user asks for
   polished/reviewed results, and fix them before submitting.
 - When you receive feedback on a previous attempt, revise that design directly
-  instead of exploring again.`
+  instead of exploring again.
+
+The canvas:
+- The chat's designs are HTML files in a folder tree (folders = groups),
+  readable under /canvas with read_file/glob/grep; you cannot change them.
+- Never modify an existing file: a change is a NEW file in a new subfolder next
+  to it (/pricing/tiers.html → "make it dark" → /pricing/dark/tiers.html).
+- Pass submit_artifact a folder (a new subfolder for changes, a new top-level
+  folder for a new design) and names (one per component; keep the original
+  file name for a new version of one component).`
 	visionCriticSystem := `You are a meticulous UI design critic. You receive a rendered screenshot
 of an HTML component plus its layout metrics and the original brief.
 

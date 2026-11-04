@@ -1,6 +1,6 @@
 # Backend — pipeline engine and runs API
 
-**State as of 2026-11-02.** Phase 6 of `plan.critique-engine.md`: a prompt in the design chat
+**State as of 2026-11-04** (canvas integration: `context_paths`, canvas context, commit of results). Phase 6 of `plan.critique-engine.md`: a prompt in the design chat
 becomes a pipeline run (generate → render → critique → gate loop → output) whose steps, artifacts
 and live events the UI shows. Package `internal/features/engine` (`engine.Module`), models in
 `internal/models/run.go`, node-agent bridge in `internal/features/agentrun/node.go`.
@@ -12,7 +12,9 @@ in-memory DB answers parallel writers with SQLITE_LOCKED). Tests use a fake `Nod
 
 ## Data model (`runs`, `run_steps`, `artifacts`)
 
-- `Run`: owner, `thread_id` (= id of the thread's first run), pipeline def id/slug/name, pinned
+- `Run`: owner, `thread_id` (= id of the thread's first run), `context_paths` (JSON, selected
+  canvas files), `canvas_folder` (default destination at start → folder used after commit),
+  `canvas_notes` (JSON, the user's canvas operations delivered to this run), pipeline def id/slug/name, pinned
   `pipeline_version` + `pipeline_version_id` (`studio_def_versions.id`; both empty for draft test runs),
   `snapshot` (the pipeline body executed — runs never see later edits), `is_test`, `input` (JSON of
   strings; images are `wcblob://` refs), `status` (pending|running|completed|failed|cancelled|
@@ -31,9 +33,9 @@ in-memory DB answers parallel writers with SQLITE_LOCKED). Tests use a fake `Nod
 
 | Route | Notes |
 |---|---|
-| `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, thread_id?, is_test?, context_artifact_ids?}` → **201** `{id, thread_id, status}`; the run executes in the background |
-| `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input, context_artifact_ids (always an array) |
-| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) + `context_artifact_ids` |
+| `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, thread_id?, is_test?, context_paths?}` → **201** `{id, thread_id, status}`; the run executes in the background |
+| `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input, context_paths (always an array), canvas_folder |
+| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) + `context_paths`, `canvas_folder`, `canvas_notes`, `canvas_paths` (live files the run committed; arrays never null) |
 | `GET /runs/{id}/events` | SSE; replays the run's history, then live; closes after `run_completed`/`run_failed`; `: ping` every 15 s. SSE requests skip the 60 s request timeout |
 | `POST /runs/{id}/cancel` | 204; 409 when already finished; a stale (not executing) pending/running row is marked cancelled |
 | `GET /artifacts/{id}/content` | blob with its stored MIME; `nosniff` + `Content-Security-Policy: … sandbox`; access follows the run's owner scoping |
@@ -61,7 +63,8 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
   the final iteration.
 - **Events** (`bus.go`, payload repeats `event` and `run_id`): `iteration_started`, `step_started`,
   `step_completed` (status, usage, artifact_ids, error), `iteration_completed` (best_score,
-  artifact_ids), `run_completed` (best_artifact_id, usage, cost), `run_failed` (error, status; also
+  artifact_ids), `run_completed` (best_artifact_id, usage, cost, result_artifact_ids,
+  canvas_paths — also in the synthesized terminal event), `run_failed` (error, status; also
   sent for cancelled/interrupted runs). History is bounded (4000) and kept 5 min after the run; a
   slow subscriber is dropped (client reconnects and replays). A run unknown to the bus gets its
   terminal state synthesized from the DB.
@@ -95,25 +98,57 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
 - Feedback for the loop target (`feedbackText`): `## Feedback on your previous attempt (iteration N)`
   + the formatted critique + `## Previous HTML` (fenced, ≤ 60 000 chars) + a revise instruction. So a
   regenerating agent sees both what was wrong and the code it wrote.
-- **Follow-ups**: a run with `thread_id` seeds iteration 1's loop value with `## Earlier in this
-  chat` — the previous brief and the thread's latest completed best HTML — so "make it dark" builds
-  on the last design (only reaches agents whose template uses the loop port, e.g. `{{feedback}}`).
-- **Selected components** (2026-11-04, canvas UI): `context_artifact_ids` (≤ 12 html artifacts the
-  caller may see; deduplicated; unknown/foreign/non-html → 400 with a `context_artifact_ids` field
-  error) are stored on the run (`runs.context_artifact_ids`, JSON) and seed iteration 1's loop value
-  with `## Selected components` — every component's id + fenced HTML (≈ 60 000 chars total budget,
-  ≥ 2 000 per component) and an instruction to edit them / derive variants from them per the brief.
-  This **replaces** the "Earlier in this chat" context for that run. Works with or without
-  `thread_id` (`selectionContext`/`resolveSelection` in `start.go`; test
-  `TestSelectedComponentsSeedTheRun`).
+- Canvas context, selection and commit: see "Canvas" below.
 - Cost: `Σ ModelCost.Estimate(usage)` over steps whose model has a models.dev price (the catalog
   parser now keeps per-model `cost`; `llm.Service.ModelCost(provider, model)`); unpriced → `cost`
   nil and budgets are not enforced.
 
+## Canvas (2026-11-04, `context.go`, store in `docs/backend.canvas.md`)
+
+- **Start** (`start.go`): `context_paths` (≤ 12 entries, each a live file or folder of the thread;
+  folders expand recursively, deduplicated; > 12 files after expansion, unknown/invalid paths or a
+  missing `thread_id` → 400 field error `context_paths`; foreign thread → 404 via `checkThread`) →
+  `run.context_paths` (expanded file paths). `run.canvas_folder` = default destination: when
+  exactly one folder `F` holds every selected file → `F/<BriefSlug(brief)>` (a top-level folder
+  instead when `F` is already 4 levels deep), else `/<BriefSlug(brief)>`. The run row is created in
+  one `dbx.Tx` with `canvas.TakeNotes` (texts on `run.canvas_notes`, each note reaches one run).
+- **Canvas context** (`buildCanvasSeed`) — iteration 1's loop seed (reaches agents whose template
+  uses the loop port, e.g. `{{feedback}}`) and the prompt variable `canvas` (`nodeRun.samples`,
+  agent nodes): `## Canvas` (files are readable under /canvas, not changeable) → `### Files`
+  (indented tree, per folder files first then subfolders, `name — score 8.6, message N`, ≤ 200
+  lines) → `### Changes the user made since the last message` (notes + "don't build on, reference
+  or recreate them") → `### Selected components` (path + fenced HTML) **or**, without a
+  selection, `### Latest result` (≤ 3 live files of the run that committed the newest file) →
+  `### Where your result goes` (never modify files; the result becomes new files in
+  `run.canvas_folder`; submit_artifact `folder`/`names`). HTML budget ≈ 60 000 chars, ≥ 2 000
+  per file. nil (no seed, no variable) for a thread with no files, notes or selection — a fresh
+  chat's first run gets no seed.
+- **Destination hints**: an artifact-contract agent's `NodeResult.Folder/Names` (submit_artifact
+  `folder`/`names`) are recorded per iteration (`iterState.dest` → `iterRecord.dest`) and as the
+  run's latest hint; the final iteration's hint wins, else the latest given. `count>1` / pick_best
+  workers don't produce hints (only the orchestrating agent's final submit does).
+- **Commit** (`finish` → `commitCanvas`, same tx as `result_artifacts`; on error the results are
+  stored without canvas files and the error logged): item i = result i; folder = the hint
+  (normalized, not `/`, may be an existing folder) else `run.canvas_folder` (fresh → made unique);
+  name = `names[i]` → the selected file's name (one file selected, one result) →
+  `<BriefSlug>.html` (one result) / `<BriefSlug>-<i>.html`; `source_path` = the selected file when
+  exactly one was selected; score = result score. `run.canvas_folder` is updated to the folder
+  used. Failed/cancelled runs commit nothing.
+- `RunDetail.canvas_paths` / `run_completed.canvas_paths` = `canvas.PathsOfRun`.
+- Tests (`engine_test.go`): `TestCompletedRunCommitsToTheCanvas` (default folder, follow-up seed =
+  tree + latest result, `canvas` variable, `ThreadID` on node requests),
+  `TestSelectedComponentsSeedAndPlaceTheResult` (selection seed, `/login-form/dark/login-form.html`
+  with `source_path`, validation incl. folder expansion past 12), `TestAgentDestinationHintsWin`,
+  `TestCanvasNotesReachTheNextRunOnce`; failed runs commit nothing; SSE carries `canvas_paths`.
+
 ## Agent bridge (`agentrun/node.go`)
 
-`Runtime.RunNode(ctx, NodeRequest{AgentID, Version, Draft, ModelSetID, Samples, Owner, Title,
-OnEvent}) (*NodeResult, error)`:
+`Runtime.RunNode(ctx, NodeRequest{AgentID, Version, Draft, ModelSetID, Samples, Owner, ThreadID,
+Title, OnEvent}) (*NodeResult, error)`:
+
+- `ThreadID` (set by the engine for agent and pick_best judge nodes) goes into the session
+  metadata (`{"owner", "thread_id"}`) and the `nodeScope`, so nested runs of the candidate tools
+  pass it on; it makes the session mount the thread's canvas at `/canvas`.
 
 - Body resolution: `Version>0` → that published version; `Draft` → the draft when present (else
   latest published); otherwise latest published (`NotFound` when unpublished).
@@ -125,7 +160,8 @@ OnEvent}) (*NodeResult, error)`:
   custom → the raw JSON object. An unusable answer gets **one** corrective user message in the same
   session ("Your answer could not be used (…). Call submit_artifact now…"); a second failure fails
   the node (`agent "slug": …`).
-- `NodeResult` carries `Usage`, `SessionID`, `Steps`, `AgentSlug/Version`, `ProviderID/ModelID`,
+- `NodeResult` carries `Folder`/`Names` (canvas destination hints from the submit_artifact
+  envelope), `Usage`, `SessionID`, `Steps`, `AgentSlug/Version`, `ProviderID/ModelID`,
   `ModelSetVersion`. `BuildInput` now accepts lists of image refs (`[]string`/`[]any`) as one
   prompt variable (each becomes an image block; preview shows `[image: name]`).
 

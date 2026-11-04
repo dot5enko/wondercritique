@@ -52,9 +52,14 @@ type Run struct {
 	Snapshot          json.RawMessage `gorm:"type:text"` // the pipeline body executed
 	IsTest            bool
 	Input             json.RawMessage `gorm:"type:text"`
-	// ContextArtifactIDs are the canvas components the user selected for this
-	// message; their HTML is seeded into the run (see engine threadContext).
-	ContextArtifactIDs []string `gorm:"serializer:json"`
+	// ContextPaths are the canvas files the user selected for this message
+	// (folders expanded); their HTML is seeded into the run (engine canvasContext).
+	ContextPaths []string `gorm:"serializer:json"`
+	// CanvasFolder is where the run's results go: the default destination
+	// computed at start, the folder actually used after the commit.
+	CanvasFolder string `gorm:"size:512"`
+	// CanvasNotes are the user's canvas operations delivered to this run.
+	CanvasNotes []string `gorm:"serializer:json"`
 
 	Status         string `gorm:"index;size:16"`
 	Iteration      int

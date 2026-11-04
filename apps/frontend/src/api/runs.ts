@@ -32,8 +32,8 @@ export interface StartRunBody {
   is_test?: boolean
   /**
    * Follow-up message in the same chat — the engine seeds the generator with
-   * the thread's previous brief and final HTML. The first run of a chat omits
-   * it; the backend sets the run's thread id to its own id.
+   * the thread's canvas (file tree, latest result, the user's changes). The
+   * first run of a chat omits it; the backend sets the thread id to the run id.
    */
   thread_id?: string
   /**
@@ -43,10 +43,11 @@ export interface StartRunBody {
   pipeline_id?: string
   input: Record<string, RunInputValue>
   /**
-   * Canvas components (html artifact ids) the message is about — the engine
-   * seeds the generator with their HTML ("## Selected components"), max 12.
+   * Canvas files or folders (paths, folders expand server-side) the message is
+   * about — the engine seeds the generator with their HTML; max 12 files.
+   * Requires `thread_id`.
    */
-  context_artifact_ids?: string[]
+  context_paths?: string[]
 }
 
 /** POST /runs → 201 `{id, thread_id, status}`; the run executes in the background. */
@@ -76,8 +77,10 @@ export interface RunListItem {
   thread_id?: string | null
   /** Used to title chat threads by their first brief. */
   input?: Record<string, RunInputValue>
-  /** Canvas components the message referred to (always an array from the engine). */
-  context_artifact_ids?: string[]
+  /** Canvas files the message was about (always an array from the engine). */
+  context_paths?: string[]
+  /** Canvas folder the results go to (default destination while running). */
+  canvas_folder?: string
 }
 
 export interface ListRunsParams {
@@ -226,8 +229,14 @@ export interface Run {
   thread_id?: string | null
   /** The pipeline body this run executed (pinned snapshot; present for every viewer). */
   pipeline_body?: PipelineBody
-  /** Canvas components the message referred to. */
-  context_artifact_ids?: string[]
+  /** Canvas files the message was about. */
+  context_paths?: string[]
+  /** Canvas folder the results go to / went to. */
+  canvas_folder?: string
+  /** The user's canvas operations delivered to this run. */
+  canvas_notes?: string[]
+  /** Canvas files this run committed (still on the canvas). */
+  canvas_paths?: string[]
   steps: RunStep[]
   artifacts: Artifact[]
   /** Results in display order: one (the selected artifact) or every component of a multi-component result. */
@@ -284,6 +293,9 @@ export type RunEvent =
       best_artifact_id?: string | null
       usage?: TokenUsage
       cost?: number
+      result_artifact_ids?: string[]
+      /** Canvas files the run committed. */
+      canvas_paths?: string[]
     }
   | { event: 'run_failed'; run_id: string; error: string }
 

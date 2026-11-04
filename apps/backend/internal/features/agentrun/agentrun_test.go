@@ -25,6 +25,7 @@ import (
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
 	"github.com/go-chi/chi/v5"
+	"gorm.io/gorm"
 )
 
 const testIssuer = "wondercritique-test"
@@ -36,6 +37,7 @@ type harness struct {
 	runtime *Runtime
 	headers string
 	prov    *fake.Provider
+	db      *gorm.DB
 }
 
 func setup(t *testing.T) *harness {
@@ -56,7 +58,7 @@ func setup(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	agentStore := memory.New()
-	rt, err := NewRuntime(defs, svc, agentStore, db, blobs.NewStore(db), nil, log)
+	rt, err := NewRuntime(defs, svc, agentStore, db, blobs.NewStore(db), nil, nil, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +85,7 @@ func setup(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, router: r, store: defs, runtime: rt, headers: "Bearer " + token, prov: prov}
+	return &harness{t: t, router: r, store: defs, runtime: rt, headers: "Bearer " + token, prov: prov, db: db}
 }
 
 func (h *harness) seedModelSet() *models.StudioDef {

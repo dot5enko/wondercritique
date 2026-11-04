@@ -1,6 +1,6 @@
 # Frontend — Studio, Runs, Design chat sections
 
-State as of 2026-11-04 (design chat rebuilt as a full-screen canvas with movable/resizable layout + selection toolbar; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
+State as of 2026-11-04 (design chat = full-screen canvas over the thread's shared file tree — folders = groups, server-stored layout, see `docs/backend.canvas.md`; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
 (see `docs/frontend.md` for stack/router/API-layer/auth). All data fetching goes through
 `src/api/*`; shared UI from `src/components/*`; forms bound via `useDirtyDraft` with
 debounced autosave to `PUT /studio/{kind}/{id}/draft` and `VersionBar` for publishing.
@@ -137,11 +137,18 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
 - **Chat list** (`pages/chat/index.tsx`): header (app name, Settings icon for admins → studio,
   logout, primary "New chat" → `/chat/new`) + one list of threads from `useThreads()` (status dot,
   title = first brief, relative time, message count) → `/chat/<id>`. Nothing else.
-- **Canvas page** (`pages/chat/canvas/index.tsx`): one chat. Model: **message = run = group**,
-  **result artifact = component**. Runs of the thread (`listRuns filter[thread_id]`, oldest first)
-  render as `RunGroup`s stacked top→bottom in a world container (flex) until the user moves or
-  arranges a group — then every group gets a canvas position (**free layout**: absolute + `translate`,
-  new messages placed below everything in a layout effect). See "Canvas layout" below.
+- **Canvas page** (`pages/chat/canvas/index.tsx`): one chat. Model: **folder = group**, **file =
+  component** — the canvas is a view of `GET /threads/{id}/canvas` (`api/canvas.ts`), the same
+  files the agents read under `/canvas`. Data: the canvas (files + layout) **and** the thread's
+  runs (`listRuns filter[thread_id]`, oldest first; message numbers, briefs, pending cards). The
+  canvas reloads when a run reaches a terminal state (a pending card reports it via `onStatus` and
+  the listed status was non-terminal) and after every canvas operation.
+  `canvas/tree.ts` `buildTree(files, pendingRuns)` builds the folders (implicit, from paths;
+  `first`/`firstRun` = earliest file below; subfolders oldest first, virtual ones last);
+  `topGroups` = the top-level folders (+ a "Top level" group for files directly under `/`). Top
+  groups stack top→bottom in a world container (flex) until the user moves or arranges one — then
+  every top group gets a canvas position (**free layout**: absolute + `translate`, new groups
+  placed below everything in a layout effect). See "Canvas layout" below.
   - Floating chrome: top-left back + chat title — the title collapses to just the back arrow
     `TITLE_COLLAPSE_MS` (3.5 s) after the chat opens (max-width/opacity/margin transition, 300 ms;
     hover re-expands with fine pointers); the floating **selection toolbar** while something is
@@ -167,28 +174,36 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   + pan, wheel = pan, ctrl/⌘+wheel (incl. trackpad pinch) = zoom at cursor, Safari `gesture*`
   events prevented. Tap → `onTap({target, additive})`; long press (touch/pen, 450 ms, cancelled
   by >8px movement or a 2nd finger, `vibrate(8)`) or `contextmenu` (right click / Android) →
-  `onMenu`. Targets = nearest `[data-sel]` (`c:<artifactId>` component, `g:<runId>` group);
+  `onMenu`. Targets = nearest `[data-sel]` (`c:<file path>` component, `g:<folder path>` group);
   `[data-canvas-ui]` subtrees (group header buttons) keep their own clicks. `rectOf` measures via
   offset chains + `data-dx`/`data-dy` (translate of moved elements; transform/animation-proof);
   `fitRect`, `zoomBy`, `setView` (optional 220 ms transition). Zoom 5%–400%.
-- **`RunGroup`** (`canvas/RunGroup.tsx`, `memo`): `<section data-sel="g:<run>" data-group>`
-  transparent rounded block (`isolate`; `absolute w-max` + translate in the free layout; move-handle
-  pill on its top edge). Its look is a separate `aria-hidden` background div (`-z-10`,
-  `bg-ink/[0.035]`, outline when selected — widths use `--inv-k` so they stay ~3px on screen) that
-  extends left / up around components moved past the block's edge. Header = index + message text + "about 1.2, 2.1" (labels of the run's
-  `context_artifact_ids`) + `RunProgress` while running + error line + Stop / Try again /
-  Reconnect / Details buttons; header and component labels use CSS `zoom: min(4, max(1, --inv-k))`
-  (`CHROME_ZOOM`) so they stay readable when zoomed out. Live data via `useRunLive` (getRun + SSE
-  + debounced refetch after step/iteration/terminal events).
-  `componentsOf(run)`: `results` (position order) → else completed `best_artifact_id` → else the
-  latest iteration's html artifacts as **drafts** (dimmed, "draft" tag). Reports components and
-  status up (`onComponents`, `onStatus` — the full list; deleted ones are only skipped when
-  rendering, labels keep the full-list index). Components container: wrap (default,
-  `max-w-[5400px]`), `row` (nowrap) or `col` per `layout.dir`; gaps x 64 / y 80. Moved components
-  are translated (any direction); a rAF + ResizeObserver layout effect pads the container
-  right/bottom (pushes the stack) and moves the background's left/top out (no layout shift).
-- **`ComponentFrame`** (`canvas/ComponentFrame.tsx`, `memo`): `[data-sel="c:<id>"]`, label `i.j`
-  (message i, component j) + score — **absolutely positioned above the box** (`bottom-full`, 28px
+- **`FolderGroup`** (`canvas/FolderGroup.tsx`, `memo`, recursive): `<section data-sel="g:<folder>">`
+  with `data-group=<path>` (top-level) or `data-subgroup=<path>` (nested); transparent rounded
+  block (`isolate`; top + free layout: `absolute top-0 left-0 w-max` + translate; nested: in its
+  parent's flow, translated by its `g:` offset like a component; move-handle pill on its top edge).
+  Its look is a separate `aria-hidden` background div (`-z-10`, `bg-ink/[0.035]`, dashed border for
+  virtual folders, outline when selected — widths use `--inv-k`) that extends left / up around
+  items moved past the block's edge. Header = folder name (`folderLabel`: last segment + `/`,
+  root = "Top level"; full path as tooltip; "new folder" tag when virtual) + "from message N:
+  brief" with a Details button (`firstRun`); `CHROME_ZOOM` (`zoom: min(4, max(1, --inv-k))`) keeps
+  it readable zoomed out. Items container (wrap default `max-w-[5400px]`, `row`, `col` per
+  `layout.dir[path]`; gaps x 64 / y 80): the folder's files (`ComponentFrame`, label = file name +
+  score), then pending cards, then subfolders (nested `FolderGroup`s). A rAF + ResizeObserver
+  layout effect pads the container right/bottom and moves the background left/top around moved
+  items (no layout shift). Everything the groups need comes in one memoized `GroupEnv` (selection
+  set, layout, `messageOf`, `onDetails`, `onRetry`, `onStatus`).
+- **`PendingCard`** (in FolderGroup.tsx): a run that is running / failed / cancelled / interrupted
+  (`statuses[id] ?? listed status` ≠ completed) shows as a dashed card `[data-pending=<run>]`
+  inside the group of `run.canvas_folder` (virtual folders are created in the tree when it doesn't
+  exist yet): message number + brief, "about <file names>" (`run.context_paths`), `RunProgress`
+  while running, error line, Stop / Try again (failed, cancelled, interrupted) / Reconnect /
+  Details, and the latest iteration's html artifacts as drafts (`useRunLive` + `componentsOf`;
+  frames without a selection key). Completed runs show nothing extra — their files are in the
+  tree.
+- **`ComponentFrame`** (`canvas/ComponentFrame.tsx`, `memo`): `id` = artifact id (loaded/cached,
+  immutable), `selKey` = `data-sel` (`c:<path>`; none for drafts), label = file name + score —
+  **absolutely positioned above the box** (`bottom-full`, 28px
   reserved by `mt-7`, grows upward when zoomed out) so zooming never changes the layout — then the
   box `[data-frame-box]` (= measured × `scale`) holding `[data-frame-doc]` (the document at its
   measured size, `data-w/h`, CSS `scale()` from the top-left) with the HTML in an iframe
@@ -207,79 +222,84 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
     the bottom-right corner (resize = **uniform scale** of the whole component, components only), `CHROME_ZOOM`-sized, visible while the
     element itself is selected (a selected group doesn't show its components' handles) and on
     hover with fine pointers (`group-hover/frame|run`).
-- **Selection**: ordered keys (`c:`/`g:`). Tap = select only it (tap again = deselect), Shift/⌘/Ctrl
-  or "Select more" mode (banner in the composer with Done) = toggle; tap on empty canvas clears
-  (not in select mode). Long press on an unselected target selects it (adds in select mode);
-  starting a handle drag selects too. Selection shows as removable chips in the composer ("1.2",
-  "Group 3"); sending expands groups to their component ids → `startRun({input:{[field]: text},
-  thread_id?, context_artifact_ids})` (max 12; see `docs/backend.engine.md` "Selected
-  components"). `field` = default pipeline's first non-image input field (admin-only lookup) else
-  `brief`. Sending is allowed while other runs are still going (each message is its own group);
-  the first message of `/chat/new` navigates (replace) to `/chat/<thread>`.
+- **Selection**: ordered keys (`c:<file>`/`g:<folder>`). Tap = select only it (tap again =
+  deselect), Shift/⌘/Ctrl or "Select more" mode (banner in the composer with Done) = toggle; tap on
+  empty canvas clears (not in select mode). Long press on an unselected target selects it (adds in
+  select mode); starting a handle drag selects too. Chips in the composer show file names /
+  `folder/`. Sending → `startRun({input:{[field]: text}, thread_id?, context_paths})`: the selected
+  paths (folders as folder paths — the server expands them; the root group `g:/` sends its direct
+  files), client-side cap 12 files after expansion (error in the composer). `field` = default
+  pipeline's first non-image input field (admin-only lookup) else `brief`. Sending is allowed while
+  other runs are going; the first message of `/chat/new` navigates (replace) to `/chat/<thread>`.
+  Try again resends the brief with the run's `context_paths` that still exist.
 - **Context menu** (`canvas/ContextMenu.tsx`, fixed at the press point, clamped/flipped, touch rows
   `pointer-coarse:h-11`): with a selection — quick requests that **just send a message** about the
   selection (Generate variants, Improve the design, Adapt for mobile, Dark version —
   `QUICK_ACTIONS`), Describe a change… (focuses the composer), Select more / Done selecting,
-  Arrange vertically / horizontally (only when arranging applies), Reset position & size, Delete
-  from canvas, Open preview + Copy HTML (single component), Run details (drawer with
-  `RunDetailView`), Clear selection. On empty canvas: Fit
+  Arrange vertically / horizontally (only when arranging applies), Reset position & size, **Rename
+  folder…** (one non-root group: prompt → `moveCanvasPath(folder, parent/name)`),
+  **Move to folder…** (components only: prompt with a folder path → one move per file), Delete from
+  canvas, Open preview + Copy HTML (single component), Run details (drawer with `RunDetailView`;
+  component → its `run_id`, group → `firstRun`), Clear selection. On empty canvas: Fit
   everything, Go to latest, New message, Reset layout (when anything is customised).
 - **Selection toolbar** (`canvas/SelectionBar.tsx`): floating icon bar while the selection is
   non-empty. Grip (drag anywhere; double-click = back to the default top-right place), count badge,
   Arrange vertically / horizontally (only when applicable — see Canvas layout), the 4 quick
-  actions, Open preview (single component), Run details (single), Reset position & size, Delete
-  from canvas, Clear, vertical ↔ horizontal toggle, More (opens the context menu beside it). Fixed
+  actions, Open preview (single component), Run details (single), Reset position & size, Rename
+  folder / Move to folder (when applicable), Delete from canvas, Clear, vertical ↔ horizontal
+  toggle, More (opens the context menu beside it). Fixed
   thickness (46px, 54px on coarse pointers = border + p-1 + button), only the long axis scrolls
   (scrollbar hidden), position clamped into the window on render / resize; place + orientation in
   localStorage `wc-canvas-toolbar` (all chats). Same `MenuAction` objects as the menu.
-- **Delete** (`deleteSelection`): selected groups / components go to `layout.removed` (hidden;
-  excluded from group expansion and `context_artifact_ids`) with a note each in `layout.pending`
-  ("message 2 "brief" with its components 2.1 = artifact X" / "component 1.2 (artifact X)"). Nothing
-  is sent; a toast offers Undo (6 s, `restore`). The next `send` appends
-  `<meta>The user deleted these from the canvas…\n- note…</meta>` to the message text
-  (`withMeta`) and clears the delivered notes; `briefOf` strips `<meta>…</meta>`, so it's never
-  shown on the canvas (and Try again doesn't resend it). Client-only: the engine's
-  "Earlier in this chat" seed may still pick a deleted run's HTML — the note tells the agent not
-  to build on it.
+- **Canvas operations** (`operate`: flush the pending layout save → call → reload the canvas;
+  failures show as a toast): **Delete** → `deleteCanvasPaths(selection paths)`; the toast offers
+  **Undo** (6 s) → `restoreCanvasOp(op_id)` (409 when a path is taken again → error toast). The
+  server records a note for the next run; nothing is sent with the message (the old client
+  `<meta>` mechanism is gone). Rename / Move as above (the server remaps layout keys).
 - **Composer** (`canvas/Composer.tsx`): floating bottom-center card, chips row, auto-growing textarea
   at 16px (no iOS focus zoom), Enter sends / Shift+Enter newline (IME-safe), Send button.
-- Render cost: `RunGroup`/`ComponentFrame` are memoized and the page's callbacks to them are
-  stable (`retry` via a ref), so typing in the composer or selection changes don't re-render frames.
-- Smoke (2026-11-04): `tmp/canvas-smoke/smoke.mjs <dist> <out>` — playwright-core (installed in
-  `tmp/canvas-smoke`) drives `/usr/bin/google-chrome` headless as a touch tablet (820×1180), serving
-  `apps/frontend/dist` and a stubbed `/api/v1` purely through `context.route` (no dev server, no
-  backend; each POST gets a fresh run id `R<n>`); touch gestures via CDP `Input.dispatchTouchEvent`;
-  fit via `Shift+Digit1`. 46 checks, incl. drag left/up, proportional scale, hidden zoom buttons,
-  constant dots, toolbar overflow/drag/orientation, delete + undo + `<meta>`, title collapse; list, legacy redirect,
-  frame shrink/height, context refs, tap select, long-press menu, select-more, pinch zoom, pan,
-  quick action payload, group selection expansion, handles (hidden unselected, move/resize stored,
-  group grows), toolbar, arrange (group vertical, groups horizontal), reset, group move → free
-  layout, new chat, zero console errors.
+- Render cost: `FolderGroup`/`PendingCard`/`ComponentFrame` are memoized and the page's callbacks
+  are stable (`retry` via a ref), so typing in the composer doesn't re-render groups and selection /
+  layout changes don't re-render frames.
+- Auto-fit "latest": the top group holding the newest running message's card, else the newest file.
+- Smoke (2026-11-04): `node tmp/canvas-smoke/smoke.mjs apps/frontend/dist tmp/canvas-smoke/out` —
+  playwright-core (installed in `tmp/canvas-smoke`) drives `/usr/bin/google-chrome` headless as a
+  touch tablet (820×1180), serving `dist` and a stubbed `/api/v1` purely through `context.route`
+  (no dev server, no backend): runs (each POST → running run `R<n>` with `canvas_folder
+  /new-r<n>`) and a mutable canvas (`GET/PUT /threads/R1/canvas…`, delete/restore/move) with
+  `/pricing/{card-one,card-two}.html`, nested `/pricing/dark/card-one.html`, `/hero/wide-hero.html`
+  and a running run targeting `/hero/taller`. Touch via CDP `Input.dispatchTouchEvent`; prompts
+  answered through `page.on('dialog')`; fit via `Shift+Digit1`. 56 checks: groups = folders incl.
+  nested, folder header origin, file labels, pending card in its virtual target folder, frame
+  shrink, tap / long-press / select-more, pinch, pan, quick action posts `context_paths`, group →
+  folder path, handles (move both ways, background grows, scale), debounced layout PUT with path
+  keys, arrange (folder col, groups row), reset, Reset layout, free layout, toolbar, delete → server
+  + undo → restore, nested folder delete, rename folder → move, move to folder → new group, no
+  `<meta>`, title collapse, new chat, zero console errors.
 
 ### Canvas layout (2026-11-04)
 
-`canvas/layout.ts` `useCanvasLayout(threadId)` — user layout on top of the flex layout, per thread
-in localStorage `wc-canvas-layout:<threadId>` (removed when empty; a `/chat/new` layout carries
-over to the created thread):
-- `pos[key]` = CSS `translate`. `c:<id>`: offset from the component's flow place, any direction
-  (zero offsets dropped). `g:<run>`: absolute canvas position
-  (kept even at 0,0). Any `g:` entry ⇒ free layout; the first group move/arrange stores every
-  group's current place first (`groupPlaces`), so nothing jumps; groups then never shift when
-  another changes height.
-- `scale[id]` = uniform scale from the resize handle (0.25–4, the corner follows the axis dragged
+`canvas/layout.ts` `useCanvasLayout(threadId)` — user layout on top of the flex layout, keyed by
+canvas paths, stored on the server (`PUT /threads/{id}/canvas/layout`, debounced
+`SAVE_DEBOUNCE_MS` = 500, flushed on thread switch / unmount / `pagehide` with `keepalive`).
+`adopt(server)` takes the server copy (page load, after an operation — the server remaps keys on
+move) unless local edits are unsaved; `flush()` saves now. A `/chat/new` layout carries over to the
+created thread. Only the toolbar place stays in localStorage.
+- `pos[key]` = CSS `translate`. `c:<file>`: offset from the component's flow place, any direction
+  (zero offsets dropped). `g:<folder>`: a top group's absolute canvas position (kept even at 0,0);
+  a nested group's offset in its parent. Any top `g:` entry ⇒ free layout; the first top-group
+  move/arrange stores every top group's current place first (`groupPlaces`), so nothing jumps.
+- `scale[file]` = uniform scale from the resize handle (0.25–4, the corner follows the axis dragged
   further; ≈1 dropped).
-- `removed[key]` / `pending[key]` = deleted groups/components and their not-yet-sent notes (see
-  Delete). "Reset layout" keeps both.
-- `dir[runId]` = `row` | `col` flow of a group's components (default wrap).
+- `dir[folder]` = `row` | `col` flow of a folder's items (default wrap).
 - Drags are imperative (page `onHandle`: `translate` + `data-dx/dy`, or box size + doc `scale()`;
   `data-dragging` → z-30) and committed to the layout on release (`cancel` restores).
-- **Arrange** (`arrange(dir)` in the page): one group → its `dir`, its component offsets cleared;
-  several groups → lined up (`lineUp`: current visual order, from the top-left-most corner, gap
-  160); ≥ 2 components of a group → lined up inside it (gap 64 row / 80 col); all of a group's
-  components → its `dir`. The actions are only offered when one of these applies (a group with a
-  single component gets none).
-- Reset position & size: components → offset + scale; groups → `dir` + their components (the
-  group's canvas place stays). Empty-canvas "Reset layout" clears everything (back to the stack).
+- **Arrange** (`arrange(dir)`): one group → its `dir`, its items' offsets cleared; several top
+  groups → lined up (`lineUp`: current visual order, from the top-left-most corner, gap 160); ≥ 2
+  items (components / nested groups) of one folder → lined up inside it (gap 64 row / 80 col); all
+  of a folder's items → its `dir`. Offered only when one of these applies.
+- Reset position & size: components → offset + scale; groups → `dir` + their items (the group's
+  own place stays). Empty-canvas "Reset layout" clears everything (back to the stack).
 
 **Layout width (2026-11-02).** `pages/shell.tsx` wraps the Outlet of all settings/studio pages in a `max-w-[1100px]` centered column; only the pipeline graph editor (`/studio/pipelines?id=`) is full-bleed. Pages must not set their own wider max-width. `Modal` sizes: sm/md/lg/xl (xl = `max-w-5xl`).
 
@@ -288,4 +308,5 @@ over to the created thread):
 - Agent editor (`AgentForm.tsx`): "Candidate tools" card appears when generate_components /
   pick_best / critique_component are enabled; edits `tool_config` (agent pickers from
   `catalog.agents`, max count). Model-set strategy is single|fallback only.
-- Canvas: every entry of `run.results` is its own component on the canvas (see Design canvas).
+- Canvas: every result of a completed run becomes its own file on the canvas (engine commit, see
+  `docs/backend.engine.md` "Canvas").

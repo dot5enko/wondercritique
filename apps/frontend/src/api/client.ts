@@ -135,6 +135,8 @@ export interface RequestOptions {
   headers?: Record<string, string>
   /** Auth endpoints must not trigger the refresh-retry loop. */
   noAuth?: boolean
+  /** Let the request outlive the page (flushing state on `pagehide`). */
+  keepalive?: boolean
 }
 
 interface AttemptOptions extends RequestOptions {
@@ -155,6 +157,7 @@ async function send(method: string, path: string, body: unknown, opts: AttemptOp
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: opts.signal,
+      keepalive: opts.keepalive,
     })
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err

@@ -25,7 +25,7 @@ import { fetchArtifact } from '../../../api/runs'
 import { cx } from '../../../ui'
 import type { Point } from './layout'
 
-/** Same as `CHROME_ZOOM` in RunGroup (kept here to avoid an import cycle). */
+/** Same as `CHROME_ZOOM` in FolderGroup (kept here to avoid an import cycle). */
 const CHROME_ZOOM = 'min(4, max(1, var(--inv-k, 1)))'
 
 /** Render width — the pipeline's Render node default, what the critics judged. */
@@ -147,6 +147,7 @@ function withMeasure(html: string): string {
 
 export const ComponentFrame = memo(function ComponentFrame({
   id,
+  selKey,
   label,
   score,
   draft,
@@ -155,8 +156,11 @@ export const ComponentFrame = memo(function ComponentFrame({
   offset,
   scale = 1,
 }: {
+  /** html artifact id (immutable): what is loaded and cached. */
   id: string
-  /** Short canvas label, e.g. `2.1` (group 2, component 1). */
+  /** Selection key (`c:<file path>`); drafts of running messages have none. */
+  selKey?: string
+  /** Canvas label: the file name. */
   label: string
   score: number | null
   draft: boolean
@@ -225,7 +229,7 @@ export const ComponentFrame = memo(function ComponentFrame({
   return (
     <div
       ref={rootRef}
-      data-sel={`c:${id}`}
+      data-sel={selKey}
       data-dx={offset?.x || undefined}
       data-dy={offset?.y || undefined}
       className={cx('group/frame relative mt-7 shrink-0 data-dragging:z-30', selected && 'z-10')}

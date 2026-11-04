@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -54,8 +55,8 @@ type startRequest struct {
 	ThreadID          string                     `json:"thread_id"`
 	IsTest            bool                       `json:"is_test"`
 	Input             map[string]json.RawMessage `json:"input" validate:"required"`
-	// ContextArtifactIDs are selected canvas components the message refers to.
-	ContextArtifactIDs []string `json:"context_artifact_ids"`
+	// ContextPaths are selected canvas files/folders the message is about.
+	ContextPaths []string `json:"context_paths"`
 }
 
 // start answers 201 `{id, thread_id, status}`; the run executes in the
@@ -72,7 +73,7 @@ func (c *Controller) start(w http.ResponseWriter, r *http.Request) error {
 		ThreadID:          req.ThreadID,
 		IsTest:            req.IsTest,
 		Input:             req.Input,
-		ContextIDs:        req.ContextArtifactIDs,
+		ContextPaths:      req.ContextPaths,
 	})
 	if err != nil {
 		return err
@@ -172,7 +173,7 @@ func (c *Controller) events(w http.ResponseWriter, r *http.Request) error {
 
 	replay, sub, live := c.engine.bus.subscribe(id)
 	if !live {
-		_ = writeFrame(w, fl, terminalFromRun(run))
+		_ = writeFrame(w, fl, c.engine.terminalFromRun(r.Context(), run))
 		return nil
 	}
 	defer c.engine.bus.unsubscribe(id, sub)
@@ -213,7 +214,7 @@ func (c *Controller) events(w http.ResponseWriter, r *http.Request) error {
 }
 
 // terminalFromRun builds the terminal event of a run from its stored state.
-func terminalFromRun(run *models.Run) busEvent {
+func (e *Engine) terminalFromRun(ctx context.Context, run *models.Run) busEvent {
 	fields := map[string]any{"run_id": run.ID}
 	name := "run_failed"
 	if run.Status == models.RunCompleted {
@@ -224,6 +225,11 @@ func terminalFromRun(run *models.Run) busEvent {
 		}
 		if run.Cost != nil {
 			fields["cost"] = *run.Cost
+		}
+		if e.Canvas != nil {
+			if paths, err := e.Canvas.PathsOfRun(ctx, run.ID); err == nil {
+				fields["canvas_paths"] = paths
+			}
 		}
 	} else {
 		msg := run.Error

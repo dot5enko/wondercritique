@@ -98,7 +98,8 @@ func sinkFrom(ctx context.Context) Sink {
 type nodeScope struct {
 	samples map[string]any
 	owner   string
-	worker  bool // the agent runs as a generate_components worker
+	thread  string // chat thread (canvas mount) passed on to nested runs
+	worker  bool   // the agent runs as a generate_components worker
 }
 
 func withScope(ctx context.Context, s nodeScope) context.Context {

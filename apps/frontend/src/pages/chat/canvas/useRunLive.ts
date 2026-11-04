@@ -96,7 +96,7 @@ export function useRunLive(runId: string): RunLive {
 
 /** One component a run shows on the canvas. */
 export interface RunComponent {
-  /** html artifact id — what selections and `context_artifact_ids` carry. */
+  /** html artifact id (drafts of a message still working; results live in the canvas tree). */
   id: string
   score: number | null
   /** Intermediate output (run still working, or it failed before a result). */

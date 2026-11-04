@@ -28,15 +28,16 @@ type iterRecord struct {
 	score      *float64
 	artifactID string   // the iteration's candidate HTML artifact ("" when none)
 	set        []string // a multi-component result: every item's artifact id (artifactID = the first)
+	dest       destHint // the agent's canvas destination for this iteration's result
 }
 
 // runState is the mutable state of one pipeline run.
 type runState struct {
-	e     *Engine
-	run   *models.Run
-	g     *graph
-	input map[string]any
-	seed  *portVal
+	e      *Engine
+	run    *models.Run
+	g      *graph
+	input  map[string]any
+	canvas *canvasRun // canvas context + selection (never nil)
 
 	mu        sync.Mutex
 	usage     models.TokenUsage
@@ -47,10 +48,38 @@ type runState struct {
 	loopValue *portVal
 	final     *iterRecord
 	lastIter  int
+	lastDest  destHint // the latest destination hint of any iteration
 }
 
-func newRunState(e *Engine, run *models.Run, g *graph, input map[string]any, seed *portVal) *runState {
-	return &runState{e: e, run: run, g: g, input: input, seed: seed}
+func newRunState(e *Engine, run *models.Run, g *graph, input map[string]any, cr *canvasRun) *runState {
+	if cr == nil {
+		cr = &canvasRun{}
+	}
+	return &runState{e: e, run: run, g: g, input: input, canvas: cr}
+}
+
+// dest is where the result goes per the agents: the final iteration's hint,
+// else the latest one given in any iteration.
+func (st *runState) dest() destHint {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.final != nil && !st.final.dest.empty() {
+		return st.final.dest
+	}
+	return st.lastDest
+}
+
+// setDest records an agent's destination hint for the iteration.
+func (st *runState) setDest(it *iterState, d destHint) {
+	if d.empty() {
+		return
+	}
+	it.mu.Lock()
+	it.dest = d
+	it.mu.Unlock()
+	st.mu.Lock()
+	st.lastDest = d
+	st.mu.Unlock()
 }
 
 // iterState is the per-iteration working set.
@@ -67,6 +96,7 @@ type iterState struct {
 	items       []*candidate // components submitted/generated as a set and not reduced by Pick best
 	decision    string       // "", "continue" or "done"
 	feedback    *portVal
+	dest        destHint
 }
 
 type candidate struct {
@@ -124,7 +154,7 @@ func (st *runState) emit(name string, fields map[string]any) {
 
 // execute iterates the graph until the gate says done (or the pipeline has no loop).
 func (st *runState) execute(ctx context.Context) error {
-	st.loopValue = st.seed
+	st.loopValue = st.canvas.seed
 	for n := 1; n <= maxIterationsCap; n++ {
 		st.lastIter = n
 		st.emit("iteration_started", map[string]any{"iteration": n})
@@ -316,6 +346,7 @@ func (st *runState) costSoFar() (float64, bool) {
 func (st *runState) currentRecord(it *iterState) *iterRecord {
 	rec := &iterRecord{n: it.n, score: it.score()}
 	it.mu.Lock()
+	rec.dest = it.dest
 	if it.candidate != nil {
 		rec.artifactID = it.candidate.artifactID
 	} else if len(it.items) > 0 {

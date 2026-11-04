@@ -3,12 +3,17 @@ package agentrun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm"
 	"github.com/dot5enko/wondercritique/apps/backend/agentkit/llm/fake"
+	"github.com/dot5enko/wondercritique/apps/backend/agentkit/vfs"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/canvas"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
 )
 
 func TestRunNodeArtifact(t *testing.T) {
@@ -244,5 +249,87 @@ func TestBuildInputImageLists(t *testing.T) {
 	txt := BuildInput("{{input}}", map[string]any{"input": []string{"a", "b"}}, false)
 	if txt.Text() != `["a","b"]` {
 		t.Errorf("text list = %q", txt.Text())
+	}
+}
+
+func TestRunNodeMountsTheThreadCanvasAndParsesDestHints(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	if err := h.db.AutoMigrate(&models.Run{}, &models.Artifact{}, &models.CanvasFile{}, &models.CanvasState{}); err != nil {
+		t.Fatal(err)
+	}
+	bl := blobs.NewStore(h.db)
+	cv := canvas.NewStore(h.db, bl)
+	h.runtime.canvas = cv
+	sha, _ := bl.Put(ctx, []byte("<div>tiers</div>"), "text/html; charset=utf-8")
+	art := models.Artifact{Base: models.Base{ID: models.NewID()}, RunID: "r1", Kind: models.ArtifactHTML, BlobSHA: sha}
+	if err := h.db.Create(&art).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := cv.Commit(ctx, "thread1", "r1", canvas.Dest{Folder: "/pricing"}, []canvas.CommitItem{{Name: "tiers.html", ArtifactID: art.ID}}); err != nil {
+		t.Fatal(err)
+	}
+
+	ms := h.seedModelSet()
+	def := h.seedAgent("gen", ms.ID, "artifact", true)
+	h.prov.Push(fake.ToolCalls(fake.Call("c1", "submit_artifact", map[string]any{
+		"html": "<div class='dark'>tiers</div>", "folder": "/pricing/dark", "names": []string{"tiers.html"},
+	})))
+	res, err := h.runtime.RunNode(ctx, NodeRequest{AgentID: def.ID, Samples: map[string]any{"brief": "dark"}, Owner: "user1", ThreadID: "thread1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.HTML != "<div class='dark'>tiers</div>" || len(res.Items) != 1 || res.Folder != "/pricing/dark" || len(res.Names) != 1 || res.Names[0] != "tiers.html" {
+		t.Fatalf("result = %+v", res)
+	}
+
+	// The session records the thread and mounts its canvas read-only.
+	sess, err := h.runtime.agentStore.GetSession(ctx, res.SessionID)
+	if err != nil || sess.Metadata["thread_id"] != "thread1" {
+		t.Fatalf("session metadata = %v, %v", sess, err)
+	}
+	mnt, ok, err := h.runtime.sessionMount(ctx, res.SessionID)
+	if err != nil || !ok {
+		t.Fatalf("mount: %v %v", ok, err)
+	}
+	if raw, err := mnt.Read(ctx, "/canvas/pricing/tiers.html"); err != nil || string(raw) != "<div>tiers</div>" {
+		t.Errorf("read canvas = %q, %v", raw, err)
+	}
+	if err := mnt.Write(ctx, "/canvas/pricing/x.html", []byte("x")); !errors.Is(err, vfs.ErrReadOnly) {
+		t.Errorf("write canvas: %v", err)
+	}
+	if err := mnt.Write(ctx, "/work/x.html", []byte("x")); err != nil {
+		t.Errorf("write work: %v", err)
+	}
+
+	// Without a thread there is no /canvas.
+	h.prov.Push(fake.ToolCalls(fake.Call("c2", "submit_artifact", map[string]string{"html": "<b>x</b>"})))
+	res, err = h.runtime.RunNode(ctx, NodeRequest{AgentID: def.ID, Samples: map[string]any{"brief": "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Folder != "" || res.Items != nil {
+		t.Errorf("plain submit = %+v", res)
+	}
+	mnt, _, _ = h.runtime.sessionMount(ctx, res.SessionID)
+	if _, err := mnt.Stat(ctx, "/canvas"); !errors.Is(err, vfs.ErrNotFound) {
+		t.Errorf("canvas without thread: %v", err)
+	}
+}
+
+func TestParseComponentSetEnvelope(t *testing.T) {
+	for in, want := range map[string]int{
+		`{"components":["<a>1</a>","<a>2</a>"]}`:         2,
+		`{"components":["<a>1</a>"]}`:                    0, // a single item needs hints
+		`{"components":["<a>1</a>"],"folder":"/x"}`:      1,
+		`{"components":["<a>1</a>"],"names":["a.html"]}`: 1,
+		`{"components":[],"folder":"/x"}`:                0,
+		`{"html":"<a>"}`:                                 0,
+		`<div>{"components":["x","y"]}</div>`:            0,
+	} {
+		set, ok := parseComponentSet(in)
+		if got := len(set.Components); (want == 0 && ok) || (want > 0 && (!ok || got != want)) {
+			t.Errorf("parseComponentSet(%s) = %+v %v", in, set, ok)
+		}
 	}
 }

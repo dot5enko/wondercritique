@@ -15,11 +15,13 @@ import (
 
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/agentrun"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/canvas"
 	llmsvc "github.com/dot5enko/wondercritique/apps/backend/internal/features/llm"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/models"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/apperr"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
 )
 
 // NodeRunner runs one studio agent inside a pipeline (implemented by
@@ -40,6 +42,7 @@ type Deps struct {
 	Agents      NodeRunner
 	Renderer    render.Renderer
 	Blobs       *blobs.Store
+	Canvas      *canvas.Store   // thread canvases (nil = results are not committed to a canvas)
 	LLM         *llmsvc.Service // catalog for pipeline validation; may be nil in tests
 	Costs       Costs
 	Log         *slog.Logger
@@ -116,9 +119,9 @@ func (e *Engine) RecoverInterrupted(ctx context.Context) (int64, error) {
 
 /* ---------- lifecycle ---------- */
 
-// launch starts executing a persisted (pending) run in the background. seed is
-// the initial loop value (follow-up context), nil for a fresh thread.
-func (e *Engine) launch(run *models.Run, g *graph, input map[string]any, seed *portVal) error {
+// launch starts executing a persisted (pending) run in the background. cr
+// carries the canvas context (the iteration-1 loop seed, the selection).
+func (e *Engine) launch(run *models.Run, g *graph, input map[string]any, cr *canvasRun) error {
 	if e.root.Err() != nil {
 		return apperr.Unavailable("the server is shutting down")
 	}
@@ -137,13 +140,13 @@ func (e *Engine) launch(run *models.Run, g *graph, input map[string]any, seed *p
 			delete(e.active, run.ID)
 			e.mu.Unlock()
 		}()
-		e.execute(ctx, run, g, input, seed)
+		e.execute(ctx, run, g, input, cr)
 	}()
 	return nil
 }
 
 // execute waits for a worker slot, runs the pipeline and records the outcome.
-func (e *Engine) execute(ctx context.Context, run *models.Run, g *graph, input map[string]any, seed *portVal) {
+func (e *Engine) execute(ctx context.Context, run *models.Run, g *graph, input map[string]any, cr *canvasRun) {
 	select {
 	case e.sem <- struct{}{}:
 		defer func() { <-e.sem }()
@@ -161,7 +164,7 @@ func (e *Engine) execute(ctx context.Context, run *models.Run, g *graph, input m
 		return
 	}
 
-	st := newRunState(e, run, g, input, seed)
+	st := newRunState(e, run, g, input, cr)
 	err := func() (err error) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -199,14 +202,31 @@ func (e *Engine) finish(run *models.Run, st *runState, runErr error) {
 			results = st.results()
 		}
 	}
+	var canvasPaths []string
 	if len(results) > 0 {
-		if err := e.DB.WithContext(bg).Create(&results).Error; err != nil {
+		// Results and their canvas files are written together.
+		err := dbx.Tx(bg, e.DB, func(ctx context.Context) error {
+			if err := dbx.Conn(ctx, e.DB).Create(&results).Error; err != nil {
+				return fmt.Errorf("persist results: %w", err)
+			}
+			paths, err := e.commitCanvas(ctx, run, st, results)
+			if err != nil {
+				return fmt.Errorf("commit to the canvas: %w", err)
+			}
+			canvasPaths = paths
+			return nil
+		})
+		if err != nil {
 			e.Log.Error("engine: persist results", "run", run.ID, "err", err)
+			canvasPaths = nil
+			if err := e.DB.WithContext(bg).Create(&results).Error; err != nil {
+				e.Log.Error("engine: persist results without canvas", "run", run.ID, "err", err)
+			}
 		}
 	}
 	// A struct update with Select applies the usage serializer (map updates would not).
 	if err := e.DB.WithContext(bg).Model(&models.Run{}).Where("id = ?", run.ID).
-		Select("Status", "Error", "FinishedAt", "Iteration", "BestArtifactID", "BestScore", "Usage", "Cost").
+		Select("Status", "Error", "FinishedAt", "Iteration", "BestArtifactID", "BestScore", "Usage", "Cost", "CanvasFolder").
 		Updates(run).Error; err != nil {
 		e.Log.Error("engine: persist run outcome", "run", run.ID, "err", err)
 	}
@@ -226,6 +246,7 @@ func (e *Engine) finish(run *models.Run, st *runState, runErr error) {
 			}
 			fields["result_artifact_ids"] = ids
 		}
+		fields["canvas_paths"] = nonNil(canvasPaths)
 		e.bus.publish(run.ID, "run_completed", fields)
 	} else {
 		msg := run.Error

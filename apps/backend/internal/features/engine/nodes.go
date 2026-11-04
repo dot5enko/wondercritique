@@ -180,6 +180,9 @@ func (nr *nodeRun) samples() map[string]any {
 	for k, v := range nr.st.input {
 		samples[k] = v
 	}
+	if text := nr.st.canvas.text(); text != "" {
+		samples["canvas"] = text
+	}
 	for port, vals := range nr.inputs {
 		text, images := combine(vals)
 		if len(images) > 0 && text == "" {
@@ -209,6 +212,7 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 		ModelSetID: strCfg(cfg, "model_set_id", ""),
 		Samples:    nr.samples(),
 		Owner:      nr.st.run.OwnerID,
+		ThreadID:   nr.st.run.ThreadID,
 		Title:      fmt.Sprintf("%s · %s", nr.st.run.PipelineName, nr.st.g.label(nr.node.ID)),
 	}
 	if count := int(numCfg(cfg, "count", 1)); count > 1 {
@@ -237,6 +241,7 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 	res.ports = map[string]*portVal{}
 	switch out.Contract.Type {
 	case "artifact":
+		nr.st.setDest(nr.it, destHint{folder: out.Folder, names: out.Names})
 		if len(out.Items) > 1 {
 			// A multi-component result ("give me 5 buttons"): every item is a
 			// result; html consumers (render, critics, gate) are skipped.
@@ -790,7 +795,7 @@ func (nr *nodeRun) execPickBest(ctx context.Context) (*nodeResult, error) {
 	ctx = agentrun.WithSink(ctx, sink)
 	v, err := agentrun.Judge(ctx, nr.st.e.Agents.RunNode, agentrun.JudgeRequest{
 		Base: agentrun.NodeRequest{
-			AgentID: judgeID, Draft: nr.st.run.IsTest, Owner: nr.st.run.OwnerID,
+			AgentID: judgeID, Draft: nr.st.run.IsTest, Owner: nr.st.run.OwnerID, ThreadID: nr.st.run.ThreadID,
 			Title: fmt.Sprintf("%s · %s", nr.st.run.PipelineName, nr.st.g.label(nr.node.ID)),
 		},
 		Brief:      brief,

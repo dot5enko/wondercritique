@@ -169,7 +169,11 @@ published_by "system". Idempotent by emptiness.
 - **Tools** (tools.go): fstools (`read_file`…`grep`) and `run_js` (shared jsrun.Runner, Warmup at
   startup) operate on a session-scoped VFS: `sessionFS` resolves
   `agentkit.CallFromContext(ctx).SessionID` → per-session mount: `/work` rw (vfs/sqlite workspace
-  `session:{id}`) + `/skills/{slug}/...` ro + `/rules/rules.md` ro (agent's rules as markdown).
+  `session:{id}`) + `/skills/{slug}/...` ro + `/rules/rules.md` ro (agent's rules as markdown) +
+  `/canvas` ro when the session metadata has `thread_id` (pipeline node sessions of a chat thread;
+  `canvas.Store.FS(thread)`, live view of the thread's canvas files, see `docs/backend.canvas.md`;
+  ephemeral Try sessions have no thread → no mount). The Runtime gets `*canvas.Store` via fx
+  (`NewRuntime(…, renderer, cv, log)`; nil disables the mount).
   Mounts are cached per session (FIFO cap 256); the material (skills/rules content) is recorded per
   agent name at build time — try sessions register their ephemeral session id → name mapping.
   `validate_component` wraps `component.Validate` (JSON report + formatted text). Terminal submit
@@ -193,11 +197,18 @@ for studio/settings pages can now be pointed at the real API.
 
 - Catalog tools `generate_components`, `pick_best`, `critique_component` (flag `candidates`); catalog
   `agents` is now serialized (pickers). `submit_artifact` takes exactly one of `html`, `path`
-  (`c3` → `/work/candidates/c3.html`) or `paths` (multi-result).
+  (`c3` → `/work/candidates/c3.html`) or `paths` (multi-result), plus optional canvas hints
+  `folder` (e.g. `/pricing/dark`) and `names` (one per component). With a hint the output is
+  always the envelope `{"components": [...], "folder", "names"}` (also for one component);
+  `parseComponentSet` accepts it with ≥ 1 item when hinted (≥ 2 otherwise) → `NodeResult.Folder/
+  Names` (2026-11-04).
 - `AgentBody.tool_config` (`ToolConfig`): `generate_components{agent_id,max_count}` (agent empty = the
   calling agent as worker without these tools; max 8, default 5), `pick_best{judge_agent_id}`
   (default slug `vision-judge`), `critique_component{critic_agent_id}` (default `vision-critic`).
   `checkAgentRefs` verifies the ids exist.
+- Seeded `component-generator` guidance has a "The canvas" paragraph (/canvas is read-only, never
+  modify a file — a change is a new file in a new subfolder, pass submit_artifact `folder`/`names`);
+  existing DB agents are not migrated. Catalog prompt variable `canvas` (2026-11-04).
 - Seeds: `vision-judge` agent (custom contract `JudgeFieldsSchema`: winner/ranking/summary),
   `ensureJudge` adds it on already-seeded installs (re-created if deleted). Seeded
   `component-generator` has the three tools + guidance; existing DB agents must enable them manually.

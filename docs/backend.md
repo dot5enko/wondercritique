@@ -231,6 +231,13 @@ request logger print the rewritten path (the handler mutates the request in plac
 Package `internal/features/engine` (`engine.Module`) executes pipelines and serves `/api/v1/runs*` and
 `/api/v1/artifacts/{id}/content` — see `docs/backend.engine.md`. Config: `ENGINE_CONCURRENCY`.
 
+## Canvas
+
+Package `internal/features/canvas` (`canvas.Module`, registered before `agentrun`/`engine` in
+`internal/app/app.go`): the per-thread tree of component files over artifacts, server-stored
+layout, delete/restore/move with notes for the next run, the read-only `/canvas` FS for agents and
+`/api/v1/threads/{id}/canvas*` — see `docs/backend.canvas.md` (2026-11-04).
+
 ## Studio backend
 
 Packages `internal/features/studio` (definition CRUD, catalog, validation, defaults),

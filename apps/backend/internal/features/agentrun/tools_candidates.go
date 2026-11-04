@@ -75,6 +75,14 @@ func (e toolEnv) owner(ctx context.Context) string {
 	return ""
 }
 
+// thread is the chat thread of the calling run ("" outside a pipeline).
+func (e toolEnv) thread(ctx context.Context) string {
+	if sc, ok := scopeFrom(ctx); ok {
+		return sc.thread
+	}
+	return ""
+}
+
 // baseSamples are the calling run's prompt variables (empty outside RunNode).
 func baseSamples(ctx context.Context) map[string]any {
 	out := map[string]any{}
@@ -221,7 +229,7 @@ func (e toolEnv) generateTool() tool.Tool {
 		if in.Count > maxCount {
 			return "", fmt.Errorf("count must be at most %d", maxCount)
 		}
-		base := NodeRequest{Owner: e.owner(ctx), Title: "candidates", Samples: baseSamples(ctx)}
+		base := NodeRequest{Owner: e.owner(ctx), ThreadID: e.thread(ctx), Title: "candidates", Samples: baseSamples(ctx)}
 		if strings.TrimSpace(in.Brief) != "" {
 			base.Samples["brief"] = in.Brief
 		}
@@ -353,7 +361,7 @@ func (e toolEnv) pickBestTool() tool.Tool {
 				brief, _ = baseSamples(ctx)["brief"].(string)
 			}
 			v, err := Judge(ctx, e.r.RunNode, JudgeRequest{
-				Base:       NodeRequest{AgentID: judgeID, Draft: e.self.Draft, Owner: e.owner(ctx), Title: "pick_best"},
+				Base:       NodeRequest{AgentID: judgeID, Draft: e.self.Draft, Owner: e.owner(ctx), ThreadID: e.thread(ctx), Title: "pick_best"},
 				Brief:      brief,
 				Criteria:   in.Criteria,
 				Candidates: entries,
@@ -445,7 +453,7 @@ func (e toolEnv) critiqueTool() tool.Tool {
 				samples["brief"] = in.Brief
 			}
 			samples["html"] = html
-			req := NodeRequest{AgentID: criticID, Draft: e.self.Draft, Owner: e.owner(ctx), Title: "critique_component", Worker: true, Samples: samples}
+			req := NodeRequest{AgentID: criticID, Draft: e.self.Draft, Owner: e.owner(ctx), ThreadID: e.thread(ctx), Title: "critique_component", Worker: true, Samples: samples}
 			activity(ctx, "Rendering the component")
 			shots, rerr := RenderShots(ctx, e.r.renderer, html, []render.Variant{judgeVariant()}, e.putShot)
 			activity(ctx, "Critic reviewing the render")

@@ -11,6 +11,7 @@ import (
 	"github.com/dot5enko/wondercritique/apps/backend/internal/config"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/agentrun"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/canvas"
 	llmsvc "github.com/dot5enko/wondercritique/apps/backend/internal/features/llm"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
@@ -31,9 +32,9 @@ var Module = fx.Options(
 )
 
 func newEngine(lc fx.Lifecycle, db *gorm.DB, defs *studio.Store, rt *agentrun.Runtime, renderer render.Renderer,
-	bl *blobs.Store, svc *llmsvc.Service, cfg *config.Config, log *slog.Logger) *Engine {
+	bl *blobs.Store, cv *canvas.Store, svc *llmsvc.Service, cfg *config.Config, log *slog.Logger) *Engine {
 	e := New(Deps{
-		DB: db, Defs: defs, Agents: rt, Renderer: renderer, Blobs: bl, LLM: svc, Costs: svc,
+		DB: db, Defs: defs, Agents: rt, Renderer: renderer, Blobs: bl, Canvas: cv, LLM: svc, Costs: svc,
 		Log: log, Concurrency: cfg.EngineConcurrency,
 	})
 	lc.Append(fx.Hook{

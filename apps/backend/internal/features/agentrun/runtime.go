@@ -22,6 +22,7 @@ import (
 	"github.com/dot5enko/wondercritique/apps/backend/agentkit/vfs"
 	"github.com/dot5enko/wondercritique/apps/backend/agentkit/vfs/sqlite"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/canvas"
 	llmsvc "github.com/dot5enko/wondercritique/apps/backend/internal/features/llm"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
@@ -38,6 +39,7 @@ type Runtime struct {
 	blobs      *blobs.Store
 	js         *jsrun.Runner
 	renderer   render.Renderer // screenshots for pick_best / critique_component (nil = unavailable)
+	canvas     *canvas.Store   // thread canvases mounted at /canvas (nil = none)
 
 	vfsStore *sqlite.Store
 	db       *sql.DB
@@ -72,7 +74,7 @@ func (r *Runtime) providerFor(ctx context.Context, providerID string) (akitllm.P
 }
 
 // NewRuntime builds the runtime. The sqlite VFS store shares the app's DB.
-func NewRuntime(defs *studio.Store, svc *llmsvc.Service, agentStore store.Store, db *gorm.DB, blobStore *blobs.Store, renderer render.Renderer, log *slog.Logger) (*Runtime, error) {
+func NewRuntime(defs *studio.Store, svc *llmsvc.Service, agentStore store.Store, db *gorm.DB, blobStore *blobs.Store, renderer render.Renderer, cv *canvas.Store, log *slog.Logger) (*Runtime, error) {
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("agentrun: sql db: %w", err)
@@ -87,6 +89,7 @@ func NewRuntime(defs *studio.Store, svc *llmsvc.Service, agentStore store.Store,
 		agentStore: agentStore,
 		blobs:      blobStore,
 		renderer:   renderer,
+		canvas:     cv,
 		js:         jsrun.New(jsrun.Config{}),
 		log:        log,
 		vfsStore:   vfsStore,

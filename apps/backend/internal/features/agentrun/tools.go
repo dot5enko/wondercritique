@@ -1,6 +1,7 @@
 // Agent tool construction (plan §4.4 allowlist → catalog tools). File tools
 // and run_js operate on a SESSION-scoped VFS: /work read-write (one sqlite
-// workspace per session id) plus read-only /skills/{slug}/ and /rules/ mounts.
+// workspace per session id) plus read-only /skills/{slug}/, /rules/ and, for
+// pipeline sessions of a chat thread, /canvas mounts.
 package agentrun
 
 import (
@@ -173,12 +174,14 @@ func submitTool(contract studio.OutputContract, fsys vfs.FS) tool.Tool {
 	switch contract.Type {
 	case "artifact":
 		type in struct {
-			HTML  string   `json:"html,omitempty" jsonschema_description:"The complete HTML component fragment"`
-			Path  string   `json:"path,omitempty" jsonschema_description:"Instead of html: a workspace file holding the component, e.g. /work/candidates/c2.html (or just c2)"`
-			Paths []string `json:"paths,omitempty" jsonschema_description:"Several components as the result (one file each), e.g. when the user asked for 5 buttons"`
+			HTML   string   `json:"html,omitempty" jsonschema_description:"The complete HTML component fragment"`
+			Path   string   `json:"path,omitempty" jsonschema_description:"Instead of html: a workspace file holding the component, e.g. /work/candidates/c2.html (or just c2)"`
+			Paths  []string `json:"paths,omitempty" jsonschema_description:"Several components as the result (one file each), e.g. when the user asked for 5 buttons"`
+			Folder string   `json:"folder,omitempty" jsonschema_description:"Canvas folder for the result, e.g. /pricing/dark — a NEW subfolder when changing an existing component"`
+			Names  []string `json:"names,omitempty" jsonschema_description:"File names, one per component, e.g. tiers.html"`
 		}
 		return tool.New("submit_artifact",
-			"Submit the final HTML component and finish the task. Pass exactly one of html, path or paths (paths = several components as the result).",
+			"Submit the final HTML component and finish the task. Pass exactly one of html, path or paths (paths = several components as the result); optionally folder and names for where the result goes on the canvas.",
 			func(ctx context.Context, i in) (string, error) {
 				set := 0
 				for _, b := range []bool{i.HTML != "", i.Path != "", len(i.Paths) > 0} {
@@ -189,24 +192,30 @@ func submitTool(contract studio.OutputContract, fsys vfs.FS) tool.Tool {
 				if set != 1 {
 					return "", fmt.Errorf("pass exactly one of html, path or paths")
 				}
+				var items []string
 				switch {
 				case i.HTML != "":
-					return i.HTML, nil
+					items = []string{i.HTML}
 				case i.Path != "":
-					return readComponent(ctx, fsys, i.Path)
-				}
-				items := make([]string, 0, len(i.Paths))
-				for _, p := range i.Paths {
-					h, err := readComponent(ctx, fsys, p)
+					h, err := readComponent(ctx, fsys, i.Path)
 					if err != nil {
 						return "", err
 					}
-					items = append(items, h)
+					items = []string{h}
+				default:
+					for _, p := range i.Paths {
+						h, err := readComponent(ctx, fsys, p)
+						if err != nil {
+							return "", err
+						}
+						items = append(items, h)
+					}
 				}
-				if len(items) == 1 {
+				hinted := strings.TrimSpace(i.Folder) != "" || len(i.Names) > 0
+				if len(items) == 1 && !hinted {
 					return items[0], nil
 				}
-				raw, err := json.Marshal(map[string][]string{componentSetKey: items})
+				raw, err := json.Marshal(componentSet{Components: items, Folder: strings.TrimSpace(i.Folder), Names: i.Names})
 				if err != nil {
 					return "", err
 				}
@@ -292,9 +301,10 @@ func (r *Runtime) sessionMount(ctx context.Context, sessionID string) (vfs.FS, b
 	// Which agent owns this session? Shared-store sessions record the agent
 	// name; try-run sessions are looked up in the ephemeral map.
 	sess, err := r.agentStore.GetSession(ctx, sessionID)
-	agentName := ""
+	agentName, thread := "", ""
 	if err == nil {
 		agentName = sess.Agent
+		thread, _ = sess.Metadata["thread_id"].(string)
 	} else {
 		r.ephemeralMu.RLock()
 		agentName = r.ephemeral[sessionID]
@@ -325,6 +335,10 @@ func (r *Runtime) sessionMount(ctx context.Context, sessionID string) (vfs.FS, b
 			Prefix: "/rules",
 			FS:     vfs.ReadOnly(memoryFS(map[string][]byte{"rules.md": []byte(material.rulesMD)})),
 		})
+	}
+	// Pipeline sessions of a chat thread read its canvas (never write it).
+	if thread != "" && r.canvas != nil {
+		points = append(points, vfs.MountPoint{Prefix: "/canvas", FS: r.canvas.FS(thread), ReadOnly: true})
 	}
 	mnt, err = vfs.NewMount(points...)
 	if err != nil {

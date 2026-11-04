@@ -21,6 +21,7 @@ import (
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/agentrun"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/auth"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/canvas"
 	llmsvc "github.com/dot5enko/wondercritique/apps/backend/internal/features/llm"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
@@ -128,7 +129,8 @@ func setup(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { _ = dbx.Close(db) })
 	if err := db.AutoMigrate(&models.StudioDef{}, &models.StudioDefVersion{}, &blobs.Blob{},
-		&models.Run{}, &models.RunStep{}, &models.Artifact{}, &models.ResultArtifact{}); err != nil {
+		&models.Run{}, &models.RunStep{}, &models.Artifact{}, &models.ResultArtifact{},
+		&models.CanvasFile{}, &models.CanvasState{}); err != nil {
 		t.Fatal(err)
 	}
 	defs := studio.NewStore(db)
@@ -145,7 +147,8 @@ func setup(t *testing.T) *harness {
 		agents.slugs[d.ID] = d.Slug
 	}
 	rend := &fakeRenderer{}
-	e := New(Deps{DB: db, Defs: defs, Agents: agents, Renderer: rend, Blobs: blobs.NewStore(db), Costs: fakeCosts{}, Log: log, Concurrency: 2})
+	bl := blobs.NewStore(db)
+	e := New(Deps{DB: db, Defs: defs, Agents: agents, Renderer: rend, Blobs: bl, Canvas: canvas.NewStore(db, bl), Costs: fakeCosts{}, Log: log, Concurrency: 2})
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -442,6 +445,9 @@ func TestAgentFailureFailsTheRun(t *testing.T) {
 	if len(stepsOf(d, "render")) != 0 {
 		t.Error("render ran after the generator failed")
 	}
+	if got := h.canvasPaths(id); len(got) != 0 {
+		t.Errorf("a failed run committed %v", got)
+	}
 }
 
 func TestRenderUnavailableGivesReadableError(t *testing.T) {
@@ -623,12 +629,50 @@ func TestListAndDetailShapes(t *testing.T) {
 	}
 }
 
-func TestFollowUpRunSeedsPreviousDesign(t *testing.T) {
+/* ---------- canvas ---------- */
+
+// canvasPaths lists the thread's live canvas paths.
+func (h *harness) canvasPaths(thread string) []string {
+	h.t.Helper()
+	files, err := h.e.Canvas.Files(context.Background(), thread)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	out := []string{}
+	for _, f := range files {
+		out = append(out, f.Path)
+	}
+	return out
+}
+
+// lastFeedback is the iteration-1 seed the latest generator call received.
+func (h *harness) lastFeedback() string {
+	gen := h.agents.callsOf("component-generator")
+	fb, _ := gen[len(gen)-1].Samples["feedback"].(string)
+	return fb
+}
+
+func TestCompletedRunCommitsToTheCanvas(t *testing.T) {
 	h := setup(t)
 	h.scripted([]float64{9}, []float64{9})
 	first, _ := h.start(h.user, `{"input":{"brief":"A login form"}}`)
 	h.waitDone(first)
+	if got := h.canvasPaths(first); len(got) != 1 || got[0] != "/login-form/login-form.html" {
+		t.Fatalf("canvas = %v", got)
+	}
+	d := h.detail(first)
+	if d.CanvasFolder != "/login-form" || len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != "/login-form/login-form.html" {
+		t.Errorf("detail canvas = %q %v", d.CanvasFolder, d.CanvasPaths)
+	}
+	if d.ContextPaths == nil || len(d.ContextPaths) != 0 || d.CanvasNotes == nil {
+		t.Errorf("first run context = %#v notes = %#v, want []", d.ContextPaths, d.CanvasNotes)
+	}
+	files, _ := h.e.Canvas.Files(context.Background(), first)
+	if files[0].Score == nil || *files[0].Score != 9 || files[0].RunID != first || files[0].ArtifactID != *d.BestArtifactID {
+		t.Errorf("file = %+v", files[0])
+	}
 
+	// A follow-up sees the tree and the latest result; its result is a new folder.
 	second, w := h.start(h.user, `{"thread_id":"`+first+`","input":{"brief":"make it dark"}}`)
 	if second == "" {
 		t.Fatalf("follow-up: %d %s", w.Code, w.Body)
@@ -637,12 +681,22 @@ func TestFollowUpRunSeedsPreviousDesign(t *testing.T) {
 	if run.ThreadID != first {
 		t.Errorf("thread = %s, want %s", run.ThreadID, first)
 	}
-	gen := h.agents.callsOf("component-generator")
-	fb, _ := gen[len(gen)-1].Samples["feedback"].(string)
-	for _, want := range []string{"Earlier in this chat", "A login form", "design 1"} {
+	fb := h.lastFeedback()
+	for _, want := range []string{"## Canvas", "/login-form/\n  login-form.html — score 9.0, message 1", "### Latest result",
+		"#### /login-form/login-form.html", "design 1", "### Where your result goes", `"/dark"`} {
 		if !strings.Contains(fb, want) {
-			t.Errorf("follow-up context lacks %q:\n%s", want, fb)
+			t.Errorf("seed lacks %q:\n%s", want, fb)
 		}
+	}
+	gen := h.agents.callsOf("component-generator")
+	if c, _ := gen[len(gen)-1].Samples["canvas"].(string); c != fb {
+		t.Error("the canvas prompt variable differs from the seed")
+	}
+	if gen[len(gen)-1].ThreadID != first || gen[0].ThreadID != first {
+		t.Errorf("thread ids = %q %q", gen[0].ThreadID, gen[len(gen)-1].ThreadID)
+	}
+	if got := h.canvasPaths(first); len(got) != 2 || got[0] != "/dark/dark.html" {
+		t.Errorf("canvas = %v", got)
 	}
 	// Other users cannot continue the thread.
 	if _, w := h.start(h.other, `{"thread_id":"`+first+`","input":{"brief":"x"}}`); w.Code != http.StatusNotFound {
@@ -650,49 +704,132 @@ func TestFollowUpRunSeedsPreviousDesign(t *testing.T) {
 	}
 }
 
-func TestSelectedComponentsSeedTheRun(t *testing.T) {
+func TestSelectedComponentsSeedAndPlaceTheResult(t *testing.T) {
 	h := setup(t)
 	h.scripted([]float64{9}, []float64{9})
 	first, _ := h.start(h.user, `{"input":{"brief":"A login form"}}`)
 	h.waitDone(first)
-	d := h.detail(first)
-	if d.BestArtifactID == nil {
-		t.Fatalf("no best artifact")
-	}
-	comp := *d.BestArtifactID
 
-	second, w := h.start(h.user, `{"thread_id":"`+first+`","context_artifact_ids":["`+comp+`","`+comp+`"],"input":{"brief":"make it dark"}}`)
+	second, w := h.start(h.user, `{"thread_id":"`+first+`","context_paths":["/login-form/login-form.html","/login-form"],"input":{"brief":"make it dark"}}`)
 	if second == "" {
 		t.Fatalf("start: %d %s", w.Code, w.Body)
 	}
 	h.waitDone(second)
-	gen := h.agents.callsOf("component-generator")
-	fb, _ := gen[len(gen)-1].Samples["feedback"].(string)
-	for _, want := range []string{"## Selected components", "id " + comp, "design 1"} {
+	fb := h.lastFeedback()
+	for _, want := range []string{"### Selected components", "#### /login-form/login-form.html", "design 1", `"/login-form/dark"`} {
 		if !strings.Contains(fb, want) {
-			t.Errorf("selection context lacks %q:\n%s", want, fb)
+			t.Errorf("selection seed lacks %q:\n%s", want, fb)
 		}
 	}
-	if strings.Contains(fb, "Earlier in this chat") {
-		t.Errorf("selection should replace the thread context:\n%s", fb)
+	if strings.Contains(fb, "### Latest result") {
+		t.Errorf("a selection replaces the latest result:\n%s", fb)
 	}
-	if got := h.detail(second).ContextArtifactIDs; len(got) != 1 || got[0] != comp {
-		t.Errorf("context ids = %v", got)
+	d := h.detail(second)
+	if len(d.ContextPaths) != 1 || d.ContextPaths[0] != "/login-form/login-form.html" {
+		t.Errorf("context paths = %v", d.ContextPaths)
 	}
-	if got := h.detail(first).ContextArtifactIDs; got == nil || len(got) != 0 {
-		t.Errorf("first run context ids = %#v, want []", got)
+	// A new version keeps the file name, in a subfolder, linked to its source.
+	if len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != "/login-form/dark/login-form.html" {
+		t.Fatalf("canvas paths = %v", d.CanvasPaths)
+	}
+	files, _ := h.e.Canvas.Files(context.Background(), first)
+	for _, f := range files {
+		if f.Path == "/login-form/dark/login-form.html" && f.SourcePath != "/login-form/login-form.html" {
+			t.Errorf("source path = %q", f.SourcePath)
+		}
 	}
 
-	// Unknown, non-html and foreign components are rejected.
-	for _, body := range []string{
-		`{"context_artifact_ids":["nope"],"input":{"brief":"x"}}`,
+	// Validation: unknown path, no thread, too many, folder expanding past the cap.
+	for name, body := range map[string]string{
+		"unknown":   `{"thread_id":"` + first + `","context_paths":["/nope.html"],"input":{"brief":"x"}}`,
+		"bad path":  `{"thread_id":"` + first + `","context_paths":["relative"],"input":{"brief":"x"}}`,
+		"no thread": `{"context_paths":["/login-form"],"input":{"brief":"x"}}`,
+		"too many":  `{"thread_id":"` + first + `","context_paths":[` + strings.Repeat(`"/login-form",`, 12) + `"/login-form"],"input":{"brief":"x"}}`,
 	} {
-		if _, w := h.start(h.user, body); w.Code != http.StatusBadRequest {
-			t.Errorf("%s: %d %s", body, w.Code, w.Body)
+		if _, w := h.start(h.user, body); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "context_paths") {
+			t.Errorf("%s: %d %s", name, w.Code, w.Body)
 		}
 	}
-	if _, w := h.start(h.other, `{"context_artifact_ids":["`+comp+`"],"input":{"brief":"x"}}`); w.Code != http.StatusBadRequest {
-		t.Errorf("foreign component: %d", w.Code)
+	if _, w := h.start(h.other, `{"thread_id":"`+first+`","context_paths":["/login-form"],"input":{"brief":"x"}}`); w.Code != http.StatusNotFound {
+		t.Errorf("foreign thread: %d", w.Code)
+	}
+	var items []canvas.CommitItem
+	for range 12 {
+		items = append(items, canvas.CommitItem{Name: "b.html", ArtifactID: *d.BestArtifactID})
+	}
+	if _, _, err := h.e.Canvas.Commit(context.Background(), first, second, canvas.Dest{Folder: "/many"}, items); err != nil {
+		t.Fatal(err)
+	}
+	if _, w := h.start(h.user, `{"thread_id":"`+first+`","context_paths":["/many"],"input":{"brief":"x"}}`); w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Errorf("12 files: %d %s", w.Code, w.Body)
+	}
+	if _, _, err := h.e.Canvas.Commit(context.Background(), first, second, canvas.Dest{Folder: "/many"}, items[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, w := h.start(h.user, `{"thread_id":"`+first+`","context_paths":["/many"],"input":{"brief":"x"}}`); w.Code != http.StatusBadRequest {
+		t.Errorf("13 files: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestAgentDestinationHintsWin(t *testing.T) {
+	h := setup(t)
+	h.scripted([]float64{9}, []float64{9})
+	first, _ := h.start(h.user, `{"input":{"brief":"pricing"}}`)
+	h.waitDone(first)
+
+	h.agents.handler = func(slug string, n int, req agentrun.NodeRequest) (*agentrun.NodeResult, error) {
+		res := htmlResult("<div>tiers</div>")
+		res.Folder, res.Names = "Pricing/Dark", []string{"Tiers Card"}
+		if strings.Contains(req.Samples["brief"].(string), "three") {
+			res.Items = []string{"<a>1</a>", "<a>2</a>", "<a>3</a>"}
+			res.Folder, res.Names = "", []string{"one.html", ""}
+		}
+		return res, nil
+	}
+	id, _ := h.start(h.user, `{"thread_id":"`+first+`","input":{"brief":"dark"}}`)
+	h.waitDone(id)
+	if d := h.detail(id); len(d.CanvasPaths) != 1 || d.CanvasPaths[0] != "/pricing/dark/tiers-card.html" || d.CanvasFolder != "/pricing/dark" {
+		t.Errorf("hinted = %q %v", d.CanvasFolder, d.CanvasPaths)
+	}
+	id, _ = h.start(h.user, `{"thread_id":"`+first+`","input":{"brief":"three buttons"}}`)
+	h.waitDone(id)
+	want := []string{"/three-buttons/one.html", "/three-buttons/three-buttons-2.html", "/three-buttons/three-buttons-3.html"}
+	if d := h.detail(id); strings.Join(d.CanvasPaths, ",") != strings.Join(want, ",") {
+		t.Errorf("multi = %v, want %v", d.CanvasPaths, want)
+	}
+}
+
+func TestCanvasNotesReachTheNextRunOnce(t *testing.T) {
+	h := setup(t)
+	h.scripted([]float64{9}, []float64{9})
+	first, _ := h.start(h.user, `{"input":{"brief":"A hero"}}`)
+	h.waitDone(first)
+	if _, _, err := h.e.Canvas.Delete(context.Background(), first, "user1", []string{"/hero"}); err != nil {
+		t.Fatal(err)
+	}
+
+	second, _ := h.start(h.user, `{"thread_id":"`+first+`","input":{"brief":"a footer"}}`)
+	h.waitDone(second)
+	fb := h.lastFeedback()
+	for _, want := range []string{"### Changes the user made since the last message", "- deleted /hero/ (1 component: /hero/hero.html)", "(the canvas is empty)"} {
+		if !strings.Contains(fb, want) {
+			t.Errorf("seed lacks %q:\n%s", want, fb)
+		}
+	}
+	if strings.Contains(fb, "design 1") {
+		t.Errorf("the deleted design leaked into the seed:\n%s", fb)
+	}
+	if d := h.detail(second); len(d.CanvasNotes) != 1 || !strings.HasPrefix(d.CanvasNotes[0], "deleted /hero/") {
+		t.Errorf("canvas notes = %v", d.CanvasNotes)
+	}
+
+	third, _ := h.start(h.user, `{"thread_id":"`+first+`","input":{"brief":"a header"}}`)
+	h.waitDone(third)
+	if fb := h.lastFeedback(); strings.Contains(fb, "Changes the user made") {
+		t.Errorf("notes delivered twice:\n%s", fb)
+	}
+	if d := h.detail(third); len(d.CanvasNotes) != 0 {
+		t.Errorf("third run notes = %v", d.CanvasNotes)
 	}
 }
 
@@ -831,7 +968,7 @@ func TestEventStreamLiveAndReplay(t *testing.T) {
 		last := frames[len(frames)-1]
 		var done map[string]any
 		_ = json.Unmarshal([]byte(last.data), &done)
-		if done["best_artifact_id"] == nil || done["usage"] == nil {
+		if paths, _ := done["canvas_paths"].([]any); done["best_artifact_id"] == nil || done["usage"] == nil || len(paths) != 1 || paths[0] != "/x/x.html" {
 			t.Errorf("%s: run_completed = %v", label, done)
 		}
 	}
@@ -845,7 +982,7 @@ func TestEventStreamLiveAndReplay(t *testing.T) {
 	delete(h.e.bus.runs, id)
 	h.e.bus.mu.Unlock()
 	frames := stream()
-	if len(frames) != 1 || frames[0].event != "run_completed" {
+	if len(frames) != 1 || frames[0].event != "run_completed" || !strings.Contains(frames[0].data, `"canvas_paths":["/x/x.html"]`) {
 		t.Errorf("synthesized = %+v", frames)
 	}
 }

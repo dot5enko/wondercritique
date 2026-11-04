@@ -131,6 +131,9 @@ type NodeRequest struct {
 	Samples    map[string]any
 	Owner      string // user id, attributed to model requests
 	Title      string
+	// ThreadID is the chat thread of the run; its canvas is mounted read-only
+	// at /canvas for the agent ("" = no canvas).
+	ThreadID string
 	// OnEvent observes the agent's run events (optional).
 	OnEvent func(agentkit.Event)
 	// Extra blocks are appended to the built input message (variation hints,
@@ -144,11 +147,15 @@ type NodeRequest struct {
 
 // NodeResult is the parsed outcome of a node run.
 type NodeResult struct {
-	Text      string          // raw final answer
-	HTML      string          // artifact contract (the first item of a set)
-	Items     []string        // artifact contract: every component when a set (≥2) was submitted
-	Critique  *Critique       // critique contract
-	Fields    json.RawMessage // custom contract
+	Text     string          // raw final answer
+	HTML     string          // artifact contract (the first item of a set)
+	Items    []string        // artifact contract: every component when a set (≥2) was submitted
+	Critique *Critique       // critique contract
+	Fields   json.RawMessage // custom contract
+	// Folder and Names are the agent's canvas destination hints
+	// (submit_artifact folder/names; empty when not given).
+	Folder    string
+	Names     []string
 	Contract  studio.OutputContract
 	Usage     llm.Usage
 	SessionID string
@@ -288,7 +295,7 @@ func (r *Runtime) RunNode(ctx context.Context, req NodeRequest) (*NodeResult, er
 
 	sess, err := nb.agent.NewSession(ctx, agentkit.SessionOptions{
 		Title:    req.Title,
-		Metadata: map[string]any{"owner": req.Owner},
+		Metadata: sessionMetadata(req),
 	})
 	if err != nil {
 		return nil, err
@@ -310,7 +317,7 @@ func (r *Runtime) RunNode(ctx context.Context, req NodeRequest) (*NodeResult, er
 	first := BuildInput(res.Body.InputTemplate, req.Samples, false)
 	first.Blocks = append(first.Blocks, req.Extra...)
 	msgs := []llm.Message{first}
-	ctx = withScope(ctx, nodeScope{samples: req.Samples, owner: req.Owner, worker: req.Worker})
+	ctx = withScope(ctx, nodeScope{samples: req.Samples, owner: req.Owner, thread: req.ThreadID, worker: req.Worker})
 	for attempt := 0; ; attempt++ {
 		text, usage, steps, err := drive(ctx, nb.agent, sess.ID, msgs, req.OnEvent)
 		out.Usage.Add(usage)
@@ -328,6 +335,16 @@ func (r *Runtime) RunNode(ctx context.Context, req NodeRequest) (*NodeResult, er
 		}
 		msgs = []llm.Message{llm.UserText(nudgeText(out.Contract, perr))}
 	}
+}
+
+// sessionMetadata is what a node session records: the owner (safety id) and
+// the thread whose canvas the session mounts.
+func sessionMetadata(req NodeRequest) map[string]any {
+	md := map[string]any{"owner": req.Owner}
+	if req.ThreadID != "" {
+		md["thread_id"] = req.ThreadID
+	}
+	return md
 }
 
 // drive runs the agent and collects its final answer.
@@ -366,7 +383,8 @@ func drive(ctx context.Context, a *agentkit.Agent, sessionID string, msgs []llm.
 func (n *NodeResult) parse() error {
 	switch n.Contract.Type {
 	case "artifact":
-		if items, ok := parseComponentSet(n.Text); ok {
+		if set, ok := parseComponentSet(n.Text); ok {
+			items := set.Components
 			for i, it := range items {
 				h, err := ExtractHTML(it)
 				if err != nil {
@@ -376,6 +394,7 @@ func (n *NodeResult) parse() error {
 			}
 			n.Items = items
 			n.HTML = items[0]
+			n.Folder, n.Names = set.Folder, set.Names
 			return nil
 		}
 		html, err := ExtractHTML(n.Text)
@@ -414,23 +433,35 @@ func nudgeText(contract studio.OutputContract, cause error) string {
 // componentSetKey marks a multi-component submission (submit_artifact paths).
 const componentSetKey = "components"
 
-// parseComponentSet recognises {"components": ["<…>", …]} with ≥2 items.
-func parseComponentSet(text string) ([]string, bool) {
+// componentSet is the submit_artifact envelope: several components, or any
+// number of components with canvas destination hints.
+type componentSet struct {
+	Components []string `json:"components"`
+	Folder     string   `json:"folder,omitempty"`
+	Names      []string `json:"names,omitempty"`
+}
+
+// parseComponentSet recognises {"components": ["<…>", …]} with ≥2 items, or
+// with ≥1 item when a folder or names are given.
+func parseComponentSet(text string) (componentSet, bool) {
+	var set componentSet
 	t := strings.TrimSpace(text)
 	if !strings.HasPrefix(t, "{") {
-		return nil, false
+		return set, false
 	}
 	var in map[string]json.RawMessage
 	if json.Unmarshal([]byte(t), &in) != nil {
-		return nil, false
+		return set, false
 	}
-	raw, ok := in[componentSetKey]
-	if !ok {
-		return nil, false
+	if _, ok := in[componentSetKey]; !ok {
+		return set, false
 	}
-	var items []string
-	if json.Unmarshal(raw, &items) != nil || len(items) < 2 {
-		return nil, false
+	if json.Unmarshal([]byte(t), &set) != nil {
+		return set, false
 	}
-	return items, true
+	hinted := set.Folder != "" || len(set.Names) > 0
+	if len(set.Components) == 0 || (len(set.Components) < 2 && !hinted) {
+		return set, false
+	}
+	return set, true
 }

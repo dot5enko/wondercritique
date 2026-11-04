@@ -9,6 +9,7 @@ import (
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/agentrun"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/auth"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/blobs"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/canvas"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/engine"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/health"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/llm"
@@ -35,6 +36,7 @@ var Module = fx.Options(
 	messages.Module,
 	llm.Module,
 	studio.Module,
+	canvas.Module,
 	agentrun.Module,
 	engine.Module,
 	render.Module,
