@@ -56,6 +56,8 @@ export const MAX_ZOOM = 4
 const LONG_PRESS_MS = 450
 const MOVE_SLOP = 8
 const SETTLE_MS = 140
+/** Spacing of the background dots, screen px. */
+const DOT_STEP = 24
 
 const clampK = (k: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, k))
 
@@ -101,12 +103,12 @@ export function useViewport(
     // re-raster at the final scale instead of staying a stretched bitmap.
     if (!immediate) world.style.willChange = 'transform'
     world.style.transform = `translate(${x}px, ${y}px) scale(${k})`
-    // dotted canvas background follows the view (coarser dots when zoomed out)
+    // The dotted background is just texture: constant dot size and spacing at
+    // any zoom, it only slides with the pan (so moving still feels anchored).
     const vp = viewportRef.current
     if (vp) {
-      const step = 24 * k * (k < 0.35 ? 4 : 1)
-      vp.style.backgroundSize = `${step}px ${step}px`
-      vp.style.backgroundPosition = `${x}px ${y}px`
+      vp.style.backgroundSize = `${DOT_STEP}px ${DOT_STEP}px`
+      vp.style.backgroundPosition = `${x % DOT_STEP}px ${y % DOT_STEP}px`
     }
     window.clearTimeout(settleTimer.current)
     if (immediate) settle()

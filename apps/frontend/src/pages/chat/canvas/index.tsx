@@ -10,8 +10,9 @@
  * and edits / derives from them. The long-press menu and the fixed selection
  * toolbar (right edge) offer canned requests ("Generate variants", …) that
  * simply send a message about the selection, plus layout actions: groups and
- * components can be moved / resized by their handles and arranged in a row or
- * a column (useCanvasLayout, remembered per chat).
+ * components can be moved / scaled by their handles and arranged in a row or
+ * a column (useCanvasLayout, remembered per chat), or deleted — that writes
+ * nothing to the chat; the next message carries a `<meta>` note about it.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
@@ -31,10 +32,11 @@ import {
   Rows3,
   Smartphone,
   Sparkles,
+  Trash2,
   Wand2,
   X,
 } from 'lucide-react'
-import { Button, IconButton } from '../../../ui'
+import { Button, cx, IconButton } from '../../../ui'
 import { Callout } from '../../../ui/Display'
 import { Modal } from '../../../components/Modal'
 import { ErrorState, isBackendMissing } from '../../../components'
@@ -56,8 +58,8 @@ import { RunGroup } from './RunGroup'
 import { ContextMenu, type MenuAction } from './ContextMenu'
 import { SelectionBar } from './SelectionBar'
 import { Composer, type ContextChip } from './Composer'
-import { loadComponentHtml, RESIZE_LIMITS, useComponentHtml } from './ComponentFrame'
-import { useCanvasLayout, type GroupDir, type Point } from './layout'
+import { loadComponentHtml, useComponentHtml } from './ComponentFrame'
+import { hasArrangement, MAX_SCALE, MIN_SCALE, useCanvasLayout, type GroupDir, type Point } from './layout'
 import type { RunComponent } from './useRunLive'
 
 const EXAMPLES = [
@@ -102,14 +104,31 @@ const FIT_INSET = { top: 72, right: 24, bottom: 150, left: 24 }
 /** Gaps of "Arrange" (= the flex gaps): components in a row / column, groups. */
 const ARRANGE_GAP = { row: 64, col: 80, group: 160 }
 
+/** The chat title collapses to the back arrow this long after the page opens. */
+const TITLE_COLLAPSE_MS = 3500
+/**
+ * Zoom − / % / + / fit buttons. Hidden: pinch / ctrl+wheel / keys cover it on
+ * touch and trackpads; kept for a future desktop toggle.
+ */
+const SHOW_ZOOM_CONTROLS = false
+
+/** Deletion notes travel to the agent inside the next message as `<meta>`, never shown on the canvas. */
+const META_RE = /<meta>[\s\S]*?<\/meta>/g
+function withMeta(message: string, notes: string[]): string {
+  if (notes.length === 0) return message
+  return `${message}\n\n<meta>\nThe user deleted these from the canvas since the last message. They are no longer part of the design: don't build on, reference or restore them unless asked.\n${notes.map((n) => `- ${n}`).join('\n')}\n</meta>`
+}
+const short = (t: string, n = 80): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t)
+
 const selectorOf = (key: string): string => `[data-sel="${CSS.escape(key)}"]`
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v))
 
 /** Text of a run's message: the pipeline's primary field, else `brief`, else the first text value. */
 function briefOf(input: Record<string, unknown> | undefined, field: string): string {
+  const clean = (x: string): string => x.replace(META_RE, '').trim()
   const v = input?.[field] ?? input?.['brief']
-  if (typeof v === 'string' && v.trim()) return v.trim()
-  for (const x of Object.values(input ?? {})) if (typeof x === 'string' && x.trim() && !x.startsWith('wcblob://')) return x.trim()
+  if (typeof v === 'string' && clean(v)) return clean(v)
+  for (const x of Object.values(input ?? {})) if (typeof x === 'string' && clean(x) && !x.startsWith('wcblob://')) return clean(x)
   return '(message)'
 }
 
@@ -162,7 +181,13 @@ export default function CanvasPage() {
   const [statuses, setStatuses] = useState<Record<string, RunStatus>>({})
   const [selection, setSelection] = useState<string[]>([])
   const [selectMode, setSelectMode] = useState(false)
-  const { layout, setPos, setSize, setDir, reset: resetLayout } = useCanvasLayout(threadId)
+  const { layout, setPos, setScale, setDir, remove, restore, clearPending, reset: resetLayout } = useCanvasLayout(threadId)
+  const removed = layout.removed
+  /** A run's components still on the canvas. */
+  const liveComps = useCallback(
+    (runId: string): RunComponent[] => (compsByRun[runId] ?? []).filter((c) => !removed[`c:${c.id}`]),
+    [compsByRun, removed],
+  )
 
   useEffect(() => {
     setCompsByRun({})
@@ -211,11 +236,11 @@ export default function CanvasPage() {
   const expand = useCallback((keys: string[]): string[] => {
     const out: string[] = []
     for (const k of keys) {
-      const ids = k.startsWith('g:') ? (compsByRun[k.slice(2)] ?? []).map((c) => c.id) : k.startsWith('c:') ? [k.slice(2)] : []
-      for (const id of ids) if (!out.includes(id)) out.push(id)
+      const ids = k.startsWith('g:') ? liveComps(k.slice(2)).map((c) => c.id) : k.startsWith('c:') ? [k.slice(2)] : []
+      for (const id of ids) if (!out.includes(id) && !removed[`c:${id}`]) out.push(id)
     }
     return out
-  }, [compsByRun])
+  }, [liveComps, removed])
 
   const runOfKey = useCallback((key: string): string | null => {
     if (key.startsWith('g:')) return key.slice(2)
@@ -258,7 +283,7 @@ export default function CanvasPage() {
 
   /* ---------- handles: move / resize (DOM moved imperatively, committed on release) ---------- */
 
-  const drag = useRef<{ el: HTMLElement; box: HTMLElement | null; from: Point; min: Point } | null>(null)
+  const drag = useRef<{ el: HTMLElement; box: HTMLElement | null; doc: HTMLElement | null; from: Point; base: Point; s0: number } | null>(null)
   const onHandle = (info: HandleInfo): void => {
     const { kind, target, phase, dx, dy } = info
     if (phase === 'start') {
@@ -273,12 +298,16 @@ export default function CanvasPage() {
         setPos(all)
         off = all[target] ?? off
       }
+      const doc = box?.querySelector<HTMLElement>('[data-frame-doc]') ?? null
+      if (kind === 'resize' && !doc) return
       drag.current = {
         el,
         box,
+        doc,
         from: box ? { x: box.offsetWidth, y: box.offsetHeight } : off,
-        // components stay inside their group (it grows to the right / bottom)
-        min: target.startsWith('c:') ? { x: off.x - el.offsetLeft, y: off.y - el.offsetTop } : { x: -Infinity, y: -Infinity },
+        // the document's natural size (the frame is drawn at base × scale)
+        base: doc ? { x: Number(doc.dataset.w), y: Number(doc.dataset.h) } : { x: 0, y: 0 },
+        s0: layout.scale[target.slice(2)] ?? 1,
       }
       el.dataset.dragging = ''
       if (!selected.has(target)) setSelection((prev) => (selectMode ? [...prev, target] : [target]))
@@ -286,21 +315,17 @@ export default function CanvasPage() {
     }
     const d = drag.current
     if (!d) return
-    const { el, box, from, min } = d
-    if (box) {
-      const w = clamp(from.x + dx, RESIZE_LIMITS.minW, RESIZE_LIMITS.maxW)
-      const h = clamp(from.y + dy, RESIZE_LIMITS.minH, RESIZE_LIMITS.maxH)
-      if (phase === 'move') {
-        box.style.width = `${w}px`
-        box.style.height = `${h}px`
-      } else if (phase === 'end') {
-        setSize(target.slice(2), { w, h })
-      } else {
-        box.style.width = `${from.x}px`
-        box.style.height = `${from.y}px`
-      }
+    const { el, box, doc, from, base, s0 } = d
+    if (box && doc) {
+      // uniform scale: the corner follows whichever axis was dragged further
+      const grow = Math.max((from.x + dx) / from.x, (from.y + dy) / from.y)
+      const s = phase === 'cancel' ? s0 : clamp(s0 * grow, MIN_SCALE, MAX_SCALE)
+      box.style.width = `${base.x * s}px`
+      box.style.height = `${base.y * s}px`
+      doc.style.transform = s !== 1 ? `scale(${s})` : ''
+      if (phase === 'end') setScale(target.slice(2), s)
     } else {
-      const p = phase === 'cancel' ? from : { x: Math.max(min.x, from.x + dx), y: Math.max(min.y, from.y + dy) }
+      const p = phase === 'cancel' ? from : { x: from.x + dx, y: from.y + dy }
       el.style.translate = `${p.x}px ${p.y}px`
       el.dataset.dx = String(p.x)
       el.dataset.dy = String(p.y)
@@ -431,12 +456,14 @@ export default function CanvasPage() {
     if (!brief || sending) return
     setSending(true)
     setSendError(null)
+    const pendingKeys = Object.keys(layout.pending)
     try {
       const res = await startRun({
-        input: { [field]: brief },
+        input: { [field]: withMeta(brief, pendingKeys.map((k) => layout.pending[k])) },
         ...(threadId ? { thread_id: threadId } : {}),
-        ...(contextIds.length > 0 ? { context_artifact_ids: contextIds.slice(0, 12) } : {}),
+        ...(contextIds.length > 0 ? { context_artifact_ids: contextIds.filter((id) => !removed[`c:${id}`]).slice(0, 12) } : {}),
       })
+      clearPending(pendingKeys)
       setText('')
       setSelection([])
       setSelectMode(false)
@@ -496,7 +523,10 @@ export default function CanvasPage() {
   }
 
   const groupKeys = selection.filter((k) => k.startsWith('g:'))
-  const canArrange = groupKeys.length > 0 || [...compsByRunOf(selection).values()].some((ks) => ks.length > 1)
+  /** Arranging means something: several groups, a group of 2+ components, or 2+ components of one group. */
+  const canArrange = groupKeys.length > 1
+    || (groupKeys.length === 1 && liveComps(groupKeys[0].slice(2)).length > 1)
+    || [...compsByRunOf(selection)].some(([run, ks]) => !groupKeys.includes(`g:${run}`) && ks.length > 1)
 
   /**
    * One group → its components flow as a row / column. Several groups → the
@@ -510,21 +540,23 @@ export default function CanvasPage() {
       setDir(runId, dir)
       for (const c of compsByRun[runId] ?? []) next[`c:${c.id}`] = null
     }
-    if (groupKeys.length === 1) flow(groupKeys[0].slice(2))
+    if (groupKeys.length === 1) {
+      if (liveComps(groupKeys[0].slice(2)).length > 1) flow(groupKeys[0].slice(2))
+    }
     else if (groupKeys.length > 1) {
       const base = free ? layout.pos : groupPlaces()
       Object.assign(next, free ? {} : base, lineUp(groupKeys, dir, ARRANGE_GAP.group, base))
     }
     for (const [runId, keys] of compsByRunOf(selection)) {
       if (groupKeys.includes(`g:${runId}`) || keys.length < 2) continue
-      if (keys.length === (compsByRun[runId] ?? []).length) flow(runId)
+      if (keys.length === liveComps(runId).length) flow(runId)
       else Object.assign(next, lineUp(keys, dir, ARRANGE_GAP[dir]))
     }
     setPos(next)
   }
 
   /**
-   * Selection back to the automatic layout: a component's offset and size; a
+   * Selection back to the automatic layout: a component's offset and scale; a
    * group's flow and its components (its canvas position stays — "Reset
    * layout" on the empty canvas restacks everything).
    */
@@ -533,29 +565,61 @@ export default function CanvasPage() {
     for (const k of selection) {
       if (k.startsWith('c:')) {
         next[k] = null
-        setSize(k.slice(2), null)
+        setScale(k.slice(2), null)
       } else {
         setDir(k.slice(2), null)
         for (const c of compsByRun[k.slice(2)] ?? []) {
           next[`c:${c.id}`] = null
-          setSize(c.id, null)
+          setScale(c.id, null)
         }
       }
     }
     setPos(next)
   }
-  const layoutEmpty = Object.keys(layout.pos).length + Object.keys(layout.size).length + Object.keys(layout.dir).length === 0
+  const layoutEmpty = !hasArrangement(layout)
+
+  /** What the agent is told about a deleted element. */
+  const removalNote = (k: string): string => {
+    if (k.startsWith('c:')) {
+      const id = k.slice(2)
+      return `component ${labels.get(id) ?? ''} (artifact ${id})`.replace('  ', ' ')
+    }
+    const runId = k.slice(2)
+    const run = runs.find((r) => r.id === runId)
+    const comps = liveComps(runId).map((c) => `${labels.get(c.id) ?? '?'} = artifact ${c.id}`)
+    return `message ${runIndex.get(runId) ?? '?'} "${short(briefOf(run?.input, field))}"${comps.length > 0 ? ` with its components ${comps.join(', ')}` : ''}`
+  }
+  /** Deletes the selection from the canvas (and from every future context); undoable for a moment. */
+  const deleteSelection = (): void => {
+    const keys = [...selection]
+    if (keys.length === 0) return
+    remove(Object.fromEntries(keys.map((k) => [k, removalNote(k)])))
+    setSelection([])
+    setSelectMode(false)
+    setNotice({
+      text: keys.length === 1 ? (keys[0].startsWith('g:') ? 'Group deleted' : 'Component deleted') : `${keys.length} deleted`,
+      undo: () => restore(keys),
+    })
+  }
 
   /* ---------- misc state ---------- */
 
   const [detailsRunId, setDetailsRunId] = useState<string | null>(null)
   const [previewId, setPreviewId] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null)
   useEffect(() => {
     if (!notice) return
-    const t = window.setTimeout(() => setNotice(null), 1800)
+    const t = window.setTimeout(() => setNotice(null), notice.undo ? 6000 : 1800)
     return () => window.clearTimeout(t)
   }, [notice])
+
+  // The title shrinks to just the back arrow after a moment (hover shows it again).
+  const [titleShort, setTitleShort] = useState(false)
+  useEffect(() => {
+    setTitleShort(false)
+    const t = window.setTimeout(() => setTitleShort(true), TITLE_COLLAPSE_MS)
+    return () => window.clearTimeout(t)
+  }, [threadId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -567,7 +631,7 @@ export default function CanvasPage() {
       if (typing) return
       if ((e.key === '=' || e.key === '+') && !e.metaKey && !e.ctrlKey) zoomBy(1.25, undefined, undefined, true)
       else if (e.key === '-' && !e.metaKey && !e.ctrlKey) zoomBy(0.8, undefined, undefined, true)
-      else if (e.key === '1' && e.shiftKey) fitAll()
+      else if (e.code === 'Digit1' && e.shiftKey) fitAll()
       else return
       autoFit.current = false
     }
@@ -579,11 +643,14 @@ export default function CanvasPage() {
 
   const ids = expand(selection)
   const single = selection.length === 1 && selection[0].startsWith('c:') ? selection[0].slice(2) : null
-  const layoutActions: MenuAction[] = [
-    { key: 'col', label: 'Arrange vertically', icon: Rows3, disabled: !canArrange, onSelect: () => arrange('col') },
-    { key: 'row', label: 'Arrange horizontally', icon: Columns3, disabled: !canArrange, onSelect: () => arrange('row') },
-    { key: 'reset', label: 'Reset position & size', icon: RotateCcw, onSelect: resetSelectionLayout },
-  ]
+  const arrangeActions: MenuAction[] = canArrange
+    ? [
+        { key: 'col', label: 'Arrange vertically', icon: Rows3, onSelect: () => arrange('col') },
+        { key: 'row', label: 'Arrange horizontally', icon: Columns3, onSelect: () => arrange('row') },
+      ]
+    : []
+  const resetAction: MenuAction = { key: 'reset', label: 'Reset position & size', icon: RotateCcw, onSelect: resetSelectionLayout }
+  const deleteAction: MenuAction = { key: 'delete', label: 'Delete from canvas', icon: Trash2, onSelect: deleteSelection }
   const quickActions: MenuAction[] = QUICK_ACTIONS.map((a) => ({
     key: a.key,
     label: a.label,
@@ -612,7 +679,7 @@ export default function CanvasPage() {
           ? { key: 'done', label: 'Done selecting', icon: ListChecks, onSelect: () => setSelectMode(false) }
           : { key: 'more', label: 'Select more', icon: ListChecks, onSelect: () => setSelectMode(true) },
       ],
-      layoutActions,
+      [...arrangeActions, resetAction, deleteAction],
       [
         ...(single
           ? [
@@ -624,7 +691,7 @@ export default function CanvasPage() {
                 onSelect: () => {
                   void loadComponentHtml(single)
                     .then((html) => navigator.clipboard.writeText(html))
-                    .then(() => setNotice('HTML copied'), () => setNotice("Couldn't copy"))
+                    .then(() => setNotice({ text: 'HTML copied' }), () => setNotice({ text: "Couldn't copy" }))
                 },
               },
             ]
@@ -638,12 +705,13 @@ export default function CanvasPage() {
   /** The fixed toolbar: layout first, then the canned requests, then single-item actions. */
   const barRunId = selection.length === 1 ? runOfKey(selection[0]) : null
   const barGroups: MenuAction[][] = [
-    layoutActions.slice(0, 2),
+    arrangeActions,
     quickActions,
     [
       ...(single ? [{ key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewId(single) }] : []),
       ...(barRunId ? [{ key: 'details', label: 'Run details', icon: ListTree, onSelect: () => setDetailsRunId(barRunId) }] : []),
-      layoutActions[2],
+      resetAction,
+      deleteAction,
       clearAction,
     ],
   ]
@@ -667,7 +735,7 @@ export default function CanvasPage() {
       >
         <div ref={worldRef} className="absolute top-0 left-0 origin-top-left">
           <div ref={contentRef} className={free ? 'relative' : 'flex flex-col items-start gap-40'}>
-            {runs.map((r, i) => (
+            {runs.map((r, i) => removed[`g:${r.id}`] ? null : (
               <RunGroup
                 key={r.id}
                 runId={r.id}
@@ -680,7 +748,8 @@ export default function CanvasPage() {
                 free={free}
                 dir={layout.dir[r.id]}
                 pos={layout.pos}
-                sizes={layout.size}
+                scales={layout.scale}
+                removed={removed}
                 onComponents={onComponents}
                 onStatus={onStatus}
                 onRetry={retry}
@@ -693,11 +762,25 @@ export default function CanvasPage() {
 
       {/* top bar */}
       <div className="pointer-events-none fixed inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div className="pointer-events-auto flex min-w-0 items-center gap-1 rounded-xl border border-line bg-surface/95 py-1 pr-3 pl-1 shadow-pop backdrop-blur">
+        <div
+          className={cx(
+            'group/title pointer-events-auto flex min-w-0 items-center rounded-xl border border-line bg-surface/95 p-1 shadow-pop backdrop-blur transition-[padding] duration-300 ease-out',
+            titleShort ? 'pointer-fine:hover:pr-3' : 'pr-3',
+          )}
+        >
           <IconButton icon={<ArrowLeft />} label="All chats" onClick={() => navigate('/chat')} />
-          <p className="min-w-0 truncate text-sm font-semibold text-ink">{title}</p>
+          <p
+            className={cx(
+              'min-w-0 truncate text-sm font-semibold text-ink transition-[max-width,opacity,margin] duration-300 ease-out',
+              titleShort
+                ? 'ml-0 max-w-0 opacity-0 pointer-fine:group-hover/title:ml-1 pointer-fine:group-hover/title:max-w-[60vw] pointer-fine:group-hover/title:opacity-100'
+                : 'ml-1 max-w-[60vw] opacity-100',
+            )}
+          >
+            {title}
+          </p>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
+        {SHOW_ZOOM_CONTROLS && (
         <div className="pointer-events-auto flex shrink-0 items-center gap-0.5 rounded-xl border border-line bg-surface/95 p-1 shadow-pop backdrop-blur">
           <IconButton icon={<Minus />} label="Zoom out" onClick={() => { autoFit.current = false; zoomBy(0.8, undefined, undefined, true) }} />
           <button
@@ -721,15 +804,16 @@ export default function CanvasPage() {
           <IconButton icon={<Plus />} label="Zoom in" onClick={() => { autoFit.current = false; zoomBy(1.25, undefined, undefined, true) }} />
           <IconButton icon={<Maximize />} label="Fit everything" onClick={() => { autoFit.current = false; fitAll() }} />
         </div>
-        {selection.length > 0 && (
-          <SelectionBar
-            count={selection.length}
-            groups={barGroups}
-            onMore={(r) => setMenu({ target: null, clientX: r.left - 264, clientY: r.top })}
-          />
         )}
-        </div>
       </div>
+
+      {selection.length > 0 && (
+        <SelectionBar
+          count={selection.length}
+          groups={barGroups}
+          onMore={(r) => setMenu({ target: null, clientX: r.left > 280 ? r.left - 264 : r.right + 8, clientY: r.top })}
+        />
+      )}
 
       {/* empty / error states (screen space) */}
       {empty && (
@@ -771,7 +855,23 @@ export default function CanvasPage() {
       )}
       {notice && (
         <div className="fixed inset-x-0 top-20 z-40 flex justify-center">
-          <span className="animate-pop rounded-full bg-ink px-3 py-1.5 text-xs text-white shadow-pop">{notice}</span>
+          <span className="flex animate-pop items-center gap-3 rounded-full bg-ink py-1.5 pr-1.5 pl-3 text-xs text-white shadow-pop">
+            {notice.text}
+            {notice.undo ? (
+              <button
+                type="button"
+                onClick={() => {
+                  notice.undo?.()
+                  setNotice(null)
+                }}
+                className="cursor-pointer rounded-full bg-white/15 px-2.5 py-0.5 font-medium outline-none hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white/50"
+              >
+                Undo
+              </button>
+            ) : (
+              <span className="w-1.5" />
+            )}
+          </span>
         </div>
       )}
 

@@ -1,13 +1,16 @@
 /**
  * User layout of one chat's canvas, on top of the automatic flex layout:
  *  - `pos`  — CSS `translate` of an element. `c:<artifact>`: offset of a moved
- *    component from its place in the group's flow. `g:<run>`: absolute canvas
- *    position — once any group is moved or arranged, every group is positioned
- *    ("free" layout, see the canvas page), so groups never shift when another
- *    one changes height;
- *  - `size` — manual frame size of a resized component (artifact id);
- *  - `dir`  — arrangement of a group's components (row / column; default wrap).
- * Kept per thread in localStorage (it's a view preference, not chat data).
+ *    component from its place in the group's flow (any direction — the group
+ *    block grows around it). `g:<run>`: absolute canvas position — once any
+ *    group is moved or arranged, every group is positioned ("free" layout, see
+ *    the canvas page), so groups never shift when another one changes height;
+ *  - `scale` — uniform scale of a resized component (artifact id);
+ *  - `dir`  — arrangement of a group's components (row / column; default wrap);
+ *  - `removed` — groups / components deleted from the canvas (hidden, out of
+ *    every context), `pending` — what of that the agent hasn't been told yet
+ *    (key → note; sent as `<meta>` with the next message, then cleared).
+ * Kept per thread in localStorage (a view of the chat, not chat data).
  */
 import { useCallback, useEffect, useState } from 'react'
 
@@ -15,19 +18,20 @@ export interface Point {
   x: number
   y: number
 }
-export interface Size {
-  w: number
-  h: number
-}
 export type GroupDir = 'row' | 'col'
 
 export interface CanvasLayout {
   pos: Record<string, Point>
-  size: Record<string, Size>
+  scale: Record<string, number>
   dir: Record<string, GroupDir>
+  removed: Record<string, true>
+  pending: Record<string, string>
 }
 
-const EMPTY: CanvasLayout = { pos: {}, size: {}, dir: {} }
+export const MIN_SCALE = 0.25
+export const MAX_SCALE = 4
+
+const EMPTY: CanvasLayout = { pos: {}, scale: {}, dir: {}, removed: {}, pending: {} }
 const storageKey = (threadId: string): string => `wc-canvas-layout:${threadId}`
 
 function load(threadId: string | null): CanvasLayout {
@@ -35,11 +39,19 @@ function load(threadId: string | null): CanvasLayout {
   try {
     const raw = localStorage.getItem(storageKey(threadId))
     const v = raw ? (JSON.parse(raw) as Partial<CanvasLayout>) : null
-    return v ? { pos: v.pos ?? {}, size: v.size ?? {}, dir: v.dir ?? {} } : EMPTY
+    return v
+      ? { pos: v.pos ?? {}, scale: v.scale ?? {}, dir: v.dir ?? {}, removed: v.removed ?? {}, pending: v.pending ?? {} }
+      : EMPTY
   } catch {
     return EMPTY
   }
 }
+
+const isEmpty = (l: CanvasLayout): boolean => Object.values(l).every((m) => Object.keys(m).length === 0)
+
+/** Anything the user arranged (what "Reset layout" would undo). */
+export const hasArrangement = (l: CanvasLayout): boolean =>
+  Object.keys(l.pos).length + Object.keys(l.scale).length + Object.keys(l.dir).length > 0
 
 export function useCanvasLayout(threadId: string | null) {
   const [state, setState] = useState<{ thread: string | null; layout: CanvasLayout }>(() => ({ thread: threadId, layout: load(threadId) }))
@@ -53,8 +65,7 @@ export function useCanvasLayout(threadId: string | null) {
   useEffect(() => {
     if (!threadId || state.thread !== threadId) return
     try {
-      const empty = Object.keys(state.layout.pos).length + Object.keys(state.layout.size).length + Object.keys(state.layout.dir).length === 0
-      if (empty) localStorage.removeItem(storageKey(threadId))
+      if (isEmpty(state.layout)) localStorage.removeItem(storageKey(threadId))
       else localStorage.setItem(storageKey(threadId), JSON.stringify(state.layout))
     } catch {
       // storage full / disabled: the layout just isn't remembered
@@ -78,12 +89,12 @@ export function useCanvasLayout(threadId: string | null) {
     })
   }, [update])
 
-  const setSize = useCallback((id: string, size: Size | null): void => {
+  const setScale = useCallback((id: string, scale: number | null): void => {
     update((l) => {
-      const next = { ...l.size }
-      if (size) next[id] = { w: Math.round(size.w), h: Math.round(size.h) }
+      const next = { ...l.scale }
+      if (scale != null && Math.abs(scale - 1) > 0.01) next[id] = Math.round(scale * 1000) / 1000
       else delete next[id]
-      return { ...l, size: next }
+      return { ...l, scale: next }
     })
   }, [update])
 
@@ -96,7 +107,39 @@ export function useCanvasLayout(threadId: string | null) {
     })
   }, [update])
 
-  const reset = useCallback((): void => update(() => EMPTY), [update])
+  /** Deletes elements from the canvas; `notes` (key → text) are queued for the agent. */
+  const remove = useCallback((notes: Record<string, string>): void => {
+    update((l) => {
+      const removed = { ...l.removed }
+      for (const k of Object.keys(notes)) removed[k] = true
+      return { ...l, removed, pending: { ...l.pending, ...notes } }
+    })
+  }, [update])
 
-  return { layout, setPos, setSize, setDir, reset }
+  /** Undoes a deletion (and drops its unsent note). */
+  const restore = useCallback((keys: string[]): void => {
+    update((l) => {
+      const removed = { ...l.removed }
+      const pending = { ...l.pending }
+      for (const k of keys) {
+        delete removed[k]
+        delete pending[k]
+      }
+      return { ...l, removed, pending }
+    })
+  }, [update])
+
+  /** The notes were delivered with a message. */
+  const clearPending = useCallback((keys: string[]): void => {
+    update((l) => {
+      const pending = { ...l.pending }
+      for (const k of keys) delete pending[k]
+      return { ...l, pending }
+    })
+  }, [update])
+
+  /** Back to the automatic layout (deletions stay). */
+  const reset = useCallback((): void => update((l) => ({ ...EMPTY, removed: l.removed, pending: l.pending })), [update])
+
+  return { layout, setPos, setScale, setDir, remove, restore, clearPending, reset }
 }

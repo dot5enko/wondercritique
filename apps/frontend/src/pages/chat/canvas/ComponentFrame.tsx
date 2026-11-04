@@ -7,8 +7,9 @@
  * hugs its component: at the 1280px render width it measures the union of the
  * visible boxes that don't span the whole width — when the component is much
  * narrower the frame shrinks to it (once), and the height follows the
- * document (ResizeObserver + a few delayed re-measures). A manual size (resize
- * handle) overrides the measured one.
+ * document (ResizeObserver + a few delayed re-measures). The resize handle
+ * scales the whole component uniformly (`scale`): the document keeps its
+ * measured size and is drawn bigger / smaller, so there is never empty space.
  *
  * Performance: an iframe is only created once its frame comes near the screen
  * (IntersectionObserver — it sees the canvas transform), and at most
@@ -22,7 +23,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchArtifact } from '../../../api/runs'
 import { cx } from '../../../ui'
-import type { Point, Size } from './layout'
+import type { Point } from './layout'
 
 /** Same as `CHROME_ZOOM` in RunGroup (kept here to avoid an import cycle). */
 const CHROME_ZOOM = 'min(4, max(1, var(--inv-k, 1)))'
@@ -32,8 +33,6 @@ export const FRAME_WIDTH = 1280
 const MIN_WIDTH = 320
 const MIN_HEIGHT = 64
 const MAX_HEIGHT = 6000
-/** Manual resize limits. */
-export const RESIZE_LIMITS = { minW: 240, maxW: 2560, minH: MIN_HEIGHT, maxH: MAX_HEIGHT }
 
 /* ---------- boot queue: few iframes starting at once ---------- */
 
@@ -154,7 +153,7 @@ export const ComponentFrame = memo(function ComponentFrame({
   selected,
   handles,
   offset,
-  manualSize,
+  scale = 1,
 }: {
   id: string
   /** Short canvas label, e.g. `2.1` (group 2, component 1). */
@@ -166,14 +165,13 @@ export const ComponentFrame = memo(function ComponentFrame({
   handles: boolean
   /** Position inside the group (moved with the handle). */
   offset?: Point
-  /** Size set with the resize handle (overrides the measured one). */
-  manualSize?: Size
+  /** Uniform scale set with the resize handle. */
+  scale?: number
 }) {
   const { html, error } = useComponentHtml(id)
   const rootRef = useRef<HTMLDivElement>(null)
   const ref = useRef<HTMLIFrameElement>(null)
   const [measured, setSize] = useState<{ w: number; h: number }>({ w: FRAME_WIDTH, h: 360 })
-  const size = manualSize ?? measured
   const doc = useMemo(() => (html != null ? withMeasure(html) : null), [html])
 
   // Mount the iframe once the frame is near the screen, then through the boot queue.
@@ -244,27 +242,36 @@ export const ComponentFrame = memo(function ComponentFrame({
         data-frame-box
         className={cx('relative rounded-lg bg-surface shadow-[0_1px_3px_rgba(0,0,0,.08),0_8px_24px_rgba(0,0,0,.06)]', draft && 'opacity-80')}
         style={{
-          width: size.w,
-          height: size.h,
+          width: measured.w * scale,
+          height: measured.h * scale,
           outline: selected ? 'calc(3px * var(--inv-k, 1)) solid var(--color-accent)' : undefined,
           outlineOffset: 'calc(2px * var(--inv-k, 1))',
         }}
       >
         <div className="h-full w-full overflow-hidden rounded-lg [contain:strict]">
-          {doc != null && mounted ? (
-            <iframe
-              ref={ref}
-              title={`Component ${label}`}
-              srcDoc={doc}
-              sandbox="allow-scripts"
-              className="pointer-events-none block h-full w-full border-0 bg-white"
-              tabIndex={-1}
-            />
-          ) : error != null ? (
-            <div className="grid h-full place-items-center text-sm text-danger">Couldn't load this component</div>
-          ) : (
-            <div className="h-full w-full animate-pulse bg-app" />
-          )}
+          {/* the document at its natural size, drawn at `scale` */}
+          <div
+            data-frame-doc
+            data-w={measured.w}
+            data-h={measured.h}
+            className="origin-top-left"
+            style={{ width: measured.w, height: measured.h, transform: scale !== 1 ? `scale(${scale})` : undefined }}
+          >
+            {doc != null && mounted ? (
+              <iframe
+                ref={ref}
+                title={`Component ${label}`}
+                srcDoc={doc}
+                sandbox="allow-scripts"
+                className="pointer-events-none block h-full w-full border-0 bg-white"
+                tabIndex={-1}
+              />
+            ) : error != null ? (
+              <div className="grid h-full place-items-center text-sm text-danger">Couldn't load this component</div>
+            ) : (
+              <div className="h-full w-full animate-pulse bg-app" />
+            )}
+          </div>
         </div>
         <FrameHandles visible={handles} scope="frame" />
       </div>

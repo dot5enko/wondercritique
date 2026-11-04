@@ -7,7 +7,8 @@
  *
  * Layout: components flow in a wrapping row (or a single row / column, see
  * `dir`); moved components are translated by their offset and the block grows
- * (padding) to keep them inside. The block itself can be moved on the canvas
+ * around them: right / bottom by padding (pushes what follows in the stack),
+ * left / top by extending its background (the layout never shifts). The block itself can be moved on the canvas
  * by its top-edge handle (then it's absolutely positioned — `free`).
  */
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
@@ -19,7 +20,7 @@ import { nodeLabel } from '../../runs/shared'
 import { RunProgress } from '../RunProgress'
 import { ComponentFrame, FRAME_WIDTH, FrameHandles } from './ComponentFrame'
 import { componentsOf, useRunLive, type RunComponent } from './useRunLive'
-import type { GroupDir, Point, Size } from './layout'
+import type { GroupDir, Point } from './layout'
 
 const COMPONENTS_LAYOUT: Record<GroupDir | 'wrap', string> = {
   wrap: 'max-w-[5400px] flex-wrap',
@@ -44,7 +45,8 @@ export const RunGroup = memo(function RunGroup({
   free,
   dir,
   pos,
-  sizes,
+  scales,
+  removed,
   onComponents,
   onStatus,
   onRetry,
@@ -64,9 +66,10 @@ export const RunGroup = memo(function RunGroup({
   /** Absolutely positioned at `offset` (free canvas layout) instead of stacked. */
   free?: boolean
   dir?: GroupDir
-  /** Layout maps of the chat (`c:<id>` offsets, manual sizes by id). */
+  /** Layout maps of the chat (`c:<id>` offsets, scales by id, deleted `c:<id>` keys). */
   pos: Record<string, Point>
-  sizes: Record<string, Size>
+  scales: Record<string, number>
+  removed: Record<string, true>
   onComponents: (runId: string, components: RunComponent[]) => void
   onStatus: (runId: string, status: RunStatus) => void
   onRetry: (run: Run) => void
@@ -91,19 +94,31 @@ export const RunGroup = memo(function RunGroup({
   const running = run != null && !isTerminalRunStatus(run.status)
   const refs = (run?.context_artifact_ids ?? []).map((id) => labelOf(id) ?? '·')
 
+  // index in the run's full list: labels stay stable when a component is deleted
+  const visible = components.map((c, i) => ({ c, i })).filter(({ c }) => !removed[`c:${c.id}`])
+
   // Grow the block around moved components (translate doesn't affect layout).
   const boxRef = useRef<HTMLDivElement>(null)
-  const posKey = components.map((c) => { const p = pos[`c:${c.id}`]; return p ? `${p.x},${p.y}` : '' }).join(';')
+  const bgRef = useRef<HTMLDivElement>(null)
+  const posKey = visible.map(({ c }) => { const p = pos[`c:${c.id}`]; return p ? `${p.x},${p.y}` : '' }).join(';')
   useLayoutEffect(() => {
     const box = boxRef.current
-    if (!box) return
+    const bg = bgRef.current
+    if (!box || !bg) return
     let raf = 0
     const fit = (): void => {
       raf = 0
+      let left = 0
+      let top = 0
       let right = 0
       let bottom = 0
       for (const el of Array.from(box.children) as HTMLElement[]) {
-        right = Math.max(right, el.offsetLeft + Number(el.dataset.dx || 0) + el.offsetWidth)
+        const x = el.offsetLeft + Number(el.dataset.dx || 0)
+        // the label sits above the frame (out of flow, in its top margin)
+        const y = el.offsetTop + Number(el.dataset.dy || 0) - parseFloat(getComputedStyle(el).marginTop || '0')
+        left = Math.min(left, x)
+        top = Math.min(top, y)
+        right = Math.max(right, x + el.offsetWidth)
         bottom = Math.max(bottom, el.offsetTop + Number(el.dataset.dy || 0) + el.offsetHeight)
       }
       const pr = parseFloat(box.style.paddingRight || '0')
@@ -112,6 +127,10 @@ export const RunGroup = memo(function RunGroup({
       const nb = Math.max(0, Math.ceil(bottom - (box.clientHeight - pb)))
       if (nr !== pr) box.style.paddingRight = nr ? `${nr}px` : ''
       if (nb !== pb) box.style.paddingBottom = nb ? `${nb}px` : ''
+      // bg is positioned in the section: the container starts after its padding (and the header)
+      const pad = parseFloat(getComputedStyle(box.parentElement as HTMLElement).paddingTop || '0')
+      bg.style.left = `${Math.min(0, Math.floor(box.offsetLeft + left - pad))}px`
+      bg.style.top = `${Math.min(0, Math.floor(box.offsetTop + top - pad))}px`
     }
     const schedule = (): void => {
       if (!raf) raf = requestAnimationFrame(fit)
@@ -131,13 +150,19 @@ export const RunGroup = memo(function RunGroup({
       data-group={runId}
       data-dx={offset?.x || undefined}
       data-dy={offset?.y || undefined}
-      className={cx('group/run inline-flex', free ? 'absolute top-0 left-0 w-max' : 'relative', 'flex-col gap-8 rounded-[40px] bg-ink/[0.035] p-12 data-dragging:z-30', selected && 'z-10')}
-      style={{
-        translate: offset ? `${offset.x}px ${offset.y}px` : undefined,
-        outline: selected ? 'calc(3px * var(--inv-k, 1)) solid var(--color-accent)' : undefined,
-        outlineOffset: 'calc(4px * var(--inv-k, 1))',
-      }}
+      className={cx('group/run isolate inline-flex', free ? 'absolute top-0 left-0 w-max' : 'relative', 'flex-col gap-8 p-12 data-dragging:z-30', selected && 'z-10')}
+      style={{ translate: offset ? `${offset.x}px ${offset.y}px` : undefined }}
     >
+      {/* the block's background: its box, extended left / up around moved components */}
+      <div
+        ref={bgRef}
+        aria-hidden
+        className="absolute inset-0 -z-10 rounded-[40px] bg-ink/[0.035]"
+        style={{
+          outline: selected ? 'calc(3px * var(--inv-k, 1)) solid var(--color-accent)' : undefined,
+          outlineOffset: 'calc(4px * var(--inv-k, 1))',
+        }}
+      />
       <FrameHandles visible={selected} scope="run" resize={false} />
       {/* header: the message + status */}
       <header className="flex max-w-[720px] flex-col gap-2 text-[15px]" style={{ zoom: CHROME_ZOOM }}>
@@ -188,9 +213,9 @@ export const RunGroup = memo(function RunGroup({
       {/* components */}
       {error != null ? (
         <p className="text-sm text-danger" style={{ zoom: CHROME_ZOOM }}>Couldn't load this message's run.</p>
-      ) : components.length > 0 ? (
+      ) : visible.length > 0 ? (
         <div ref={boxRef} className={cx('relative flex items-start gap-x-16 gap-y-20', COMPONENTS_LAYOUT[dir ?? 'wrap'])}>
-          {components.map((c, i) => (
+          {visible.map(({ c, i }) => (
             <ComponentFrame
               key={c.id}
               id={c.id}
@@ -200,7 +225,7 @@ export const RunGroup = memo(function RunGroup({
               selected={selected || isSelected(c.id)}
               handles={isSelected(c.id)}
               offset={pos[`c:${c.id}`]}
-              manualSize={sizes[c.id]}
+              scale={scales[c.id]}
             />
           ))}
         </div>
