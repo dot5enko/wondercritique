@@ -22,7 +22,8 @@ was not started from app work.
 - Backend runs as uid 10001 (`app`, HOME `/home/app` — Chrome needs a writable HOME), `DB_PATH=/data/app.db`
   (blobs live in the same SQLite), `RENDER_CHROME_PATH=/usr/bin/chromium`. Image HEALTHCHECK curls
   `/readyz`; frontend `depends_on` it with `service_healthy`.
-- `APP_ENV` defaults to `dev`: login codes are logged (`docker compose logs backend`), empty
+- `APP_ENV` defaults to `dev`: without `RESEND_API_KEY` login codes are logged (`docker compose logs backend`)
+  and shown on the login page with a "Local mode" notice (don't expose such a stack publicly), empty
   `JWT_SECRET` → per-process secret. `prod` needs `JWT_SECRET`, `SECRETS_KEY`, `RESEND_API_KEY`, `MAIL_FROM`.
 - Chrome sandbox: backend has `security_opt: seccomp=unconfined, apparmor=unconfined` so Chromium's
   user-namespace sandbox works inside the container (Docker's default profiles block it) instead of

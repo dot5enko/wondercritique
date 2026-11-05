@@ -32,7 +32,7 @@ chat, no sidebar on chat routes). Base stack unchanged.
 
 | Route | Guard | Page |
 |---|---|---|
-| `/login` | public | email-code login (start → verify, resend countdown from 60 s / `Retry-After`) |
+| `/login` | public | email-code login (start → verify, resend countdown from 60 s / `Retry-After`); when start returns `dev_code` (dev, no Resend key) a warning Callout shows the code + `dev_notice` with a "Use code" button |
 | `/setup` | admin, no shell | first-run wizard (2026-11-05): provider (openrouter/meta) + API key + test, Meta-family model → published `default` model set, done; `SetupGate` (in `AuthProvider`) redirects admins with `needs_setup` here; re-runnable, shows "already set up" when a ready provider exists |
 | `/` | auth | redirect → `/chat` |
 | `/chat` | auth, **no shell** | chat list: style-guide pills (create / tap → `/chat/new?styleguide=<id>`, see `docs/frontend.studio-ui.md` "Style guides") + search + full-width "New chat" first row + chats in chunks with a "Load more" pill (`pages/chat/index.tsx`, `GET /threads`); legacy `?thread=x` redirects (loader) to `/chat/x` |

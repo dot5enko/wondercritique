@@ -15,6 +15,10 @@ const PROVIDER = 'email_code'
 export interface EmailCodeStart {
   sent: boolean
   expires_in: number
+  /** Local mode only (dev, no RESEND_API_KEY): the code itself, since no email is sent. */
+  dev_code?: string
+  /** Why `dev_code` is shown. */
+  dev_notice?: string
 }
 
 /**

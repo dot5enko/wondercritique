@@ -167,6 +167,25 @@ func (e *env) login(email string) resp {
 	return e.expect(e.verify(email, e.mail.lastCode(e.t)), 200)
 }
 
+// With the dev log mailer (no RESEND_API_KEY) the code comes back in the start response.
+func TestEmailCodeDevCodeWithLogMailer(t *testing.T) {
+	e := newEnv(t)
+	log := slog.New(slog.DiscardHandler)
+	p := newEmailCodeProvider(e.db, mailer.NewLog(log), e.keys, e.clock.Now, log)
+
+	res, err := p.Start(t.Context(), json.RawMessage(`{"email":"bob@example.com"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := res["dev_code"].(string)
+	if !codeRe.MatchString(code) || res["dev_notice"] == "" {
+		t.Fatalf("start result = %v", res)
+	}
+	if _, err := p.Verify(t.Context(), json.RawMessage(`{"email":"bob@example.com","code":"`+code+`"}`)); err != nil {
+		t.Fatalf("verify dev_code: %v", err)
+	}
+}
+
 func errCode(r resp) string {
 	if m, ok := r.body["error"].(map[string]any); ok {
 		s, _ := m["code"].(string)
@@ -188,6 +207,9 @@ func TestEmailCodeFlow(t *testing.T) {
 	r := e.expect(e.start("  Alice@Example.COM "), 200)
 	if r.body["sent"] != true || r.body["expires_in"] != float64(600) {
 		t.Fatalf("start body = %s", r.raw)
+	}
+	if _, ok := r.body["dev_code"]; ok {
+		t.Fatalf("dev_code leaked with a real mailer: %s", r.raw)
 	}
 	if to := e.mail.sent[0].To; to != "alice@example.com" {
 		t.Fatalf("mail to = %q", to)

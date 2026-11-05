@@ -23,7 +23,7 @@ within 60 s or per-IP rate limit → 429 with a `Retry-After` header; mail deliv
 
 ```sh
 curl -XPOST localhost:8080/api/v1/auth/email_code/start  -d '{"email":"me@example.com"}'
-# dev: the code is printed in the server log
+# dev without RESEND_API_KEY: the code is in the server log and in the start response (dev_code)
 curl -XPOST localhost:8080/api/v1/auth/email_code/verify -d '{"email":"me@example.com","code":"123456"}'
 ```
 
@@ -103,7 +103,7 @@ for client errors. Provider names must be unique; startup fails on a duplicate.
 |---|---|
 | `JWT_SECRET` | ≥ 32 bytes, required in prod. Empty in dev → a random secret per process (logged warning; tokens don't survive restarts). Separate JWT and code-HMAC keys are derived from it. |
 | `JWT_ISSUER` | `iss` claim, default `wonder-critique`. |
-| `RESEND_API_KEY` | Sends email via Resend. If empty, dev logs emails (including codes) and prod refuses to start. |
+| `RESEND_API_KEY` | Sends email via Resend. If empty, dev logs emails (including codes) and prod refuses to start. With the dev log mailer, `POST /auth/email_code/start` also returns `dev_code` + `dev_notice` (since 2026-11-05) and the login page shows the code with a "Local mode" notice — so in that mode anyone who can reach the app can sign in as any email (including `ADMIN_EMAILS`). |
 | `MAIL_FROM` | Sender, required when `RESEND_API_KEY` is set, e.g. `Wonder Critique <noreply@example.com>`. |
 | `ADMIN_EMAILS` | Comma list (since 2026-11-02). At startup each address is upserted as a role-`admin` user: missing users are created, existing ones promoted, soft-deleted ones skipped with a warning. Login still goes through the normal providers (identities link by email); a promoted user's new role reaches the access token on the next refresh or login. Runs inside a single tx as a `fx.Invoke` in `auth.Module` (after `dbx` migrations, which register first). |
 

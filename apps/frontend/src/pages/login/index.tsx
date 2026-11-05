@@ -27,6 +27,8 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resendIn, setResendIn] = useState(0)
+  // Local mode (no email delivery): the backend returns the code itself.
+  const [devCode, setDevCode] = useState<{ code: string; notice: string } | null>(null)
 
   // Refresh the resend countdown once per second while it runs.
   useEffect(() => {
@@ -41,6 +43,7 @@ export default function LoginPage() {
     try {
       const start: EmailCodeStart = await login(email)
       setStep('code')
+      setDevCode(start.dev_code ? { code: start.dev_code, notice: start.dev_notice ?? '' } : null)
       setResendIn(Math.min(start.expires_in, RESEND_COOLDOWN))
     } catch (err) {
       applyApiError(err)
@@ -117,7 +120,21 @@ export default function LoginPage() {
             </form>
           ) : (
             <form onSubmit={confirmCode} className="flex flex-col gap-4">
-              <Field label="6-digit code" hint="Check your inbox — the code is valid for 10 minutes.">
+              {devCode && (
+                <Callout tone="warning" title="Local mode — no email sent">
+                  <p>{devCode.notice}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <code className="font-mono text-sm tracking-[0.3em] text-ink">{devCode.code}</code>
+                    <Button variant="ghost" size="sm" type="button" onClick={() => setCode(devCode.code)}>
+                      Use code
+                    </Button>
+                  </div>
+                </Callout>
+              )}
+              <Field
+                label="6-digit code"
+                hint={devCode ? 'The code is valid for 10 minutes.' : 'Check your inbox — the code is valid for 10 minutes.'}
+              >
                 <Input
                   autoFocus
                   required
@@ -144,6 +161,7 @@ export default function LoginPage() {
                   onClick={() => {
                     setStep('email')
                     setCode('')
+                    setDevCode(null)
                     setError(null)
                   }}
                 >
