@@ -2,16 +2,17 @@
  * Floating toolbar for the current selection — the essentials only (the page
  * passes them: vision mode, describe a change, preview, delete, clear); every
  * other action lives in the context menu behind More. One icon button per
- * action, sections separated by hairlines, a count badge. Same `MenuAction`s
+ * action, sections separated by hairlines. Same `MenuAction`s
  * as the context menu.
  *
  * Fixed thickness (only the long axis scrolls, scrollbar hidden). The grip
- * moves it anywhere on screen; More's menu can flip it vertical ↔ horizontal.
- * Both are remembered (localStorage, all chats); the default is the top-right
+ * moves it anywhere on screen; the orientation button flips it vertical ↔
+ * horizontal (same action is also in More's menu). Both are remembered
+ * (localStorage, all chats); the default is the top-right
  * corner, vertical. The position is clamped into the window on every render.
  */
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { Ellipsis, GripHorizontal, GripVertical } from 'lucide-react'
+import { ArrowLeftRight, ArrowUpDown, Ellipsis, GripHorizontal, GripVertical } from 'lucide-react'
 import { cx } from '../../../ui'
 import type { MenuAction } from './ContextMenu'
 
@@ -44,10 +45,9 @@ function loadPlace(): BarPlace {
 
 const BUTTON = 'grid size-9 shrink-0 cursor-pointer place-items-center rounded-lg text-ink-2 outline-none transition-colors duration-100 hover:bg-app hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/40 pointer-coarse:size-11'
 
-export function SelectionBar({ count, groups, onMore }: {
-  count: number
-  groups: MenuAction[][]
+export function SelectionBar({ groups, onMore }: {
   /** "More actions" — opens the full context menu next to the button. */
+  groups: MenuAction[][]
   onMore: (anchor: DOMRect, toolbar: BarControls) => void
 }) {
   const [place, setPlace] = useState<BarPlace>(loadPlace)
@@ -134,9 +134,6 @@ export function SelectionBar({ count, groups, onMore }: {
       >
         {vertical ? <GripHorizontal size={15} /> : <GripVertical size={15} />}
       </button>
-      <span className="grid h-6 min-w-6 shrink-0 place-items-center rounded-full bg-accent px-1.5 text-2xs font-semibold text-white tabular-nums" title={`${count} selected`}>
-        {count}
-      </span>
       {sections.map((items, i) => (
         <div key={i} className={cx('flex shrink-0 items-center gap-0.5', vertical ? 'w-full flex-col' : 'h-full flex-row')}>
           <div role="separator" className={sep} />
@@ -160,6 +157,18 @@ export function SelectionBar({ count, groups, onMore }: {
         </div>
       ))}
       <div role="separator" className={sep} />
+      <button
+        type="button"
+        title={vertical ? 'Make horizontal' : 'Make vertical'}
+        aria-label={vertical ? 'Make horizontal' : 'Make vertical'}
+        onClick={(e) => {
+          e.currentTarget.blur()
+          setPlace((p) => ({ ...p, orientation: p.orientation === 'vertical' ? 'horizontal' : 'vertical' }))
+        }}
+        className={BUTTON}
+      >
+        {vertical ? <ArrowLeftRight size={17} /> : <ArrowUpDown size={17} />}
+      </button>
       <button
         type="button"
         title="More actions"

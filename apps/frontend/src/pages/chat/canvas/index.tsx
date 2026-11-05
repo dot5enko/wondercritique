@@ -982,7 +982,6 @@ export default function CanvasPage() {
 
       {selection.length > 0 && (
         <SelectionBar
-          count={selection.length}
           groups={barGroups}
           onMore={(r, toolbar) => setMenu({ target: null, clientX: r.left > 280 ? r.left - 264 : r.right + 8, clientY: r.top, toolbar })}
         />

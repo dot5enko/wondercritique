@@ -75,8 +75,8 @@ export function ContextMenu({
       role="menu"
       tabIndex={-1}
       onContextMenu={(e) => e.preventDefault()}
-      className="fixed z-50 w-64 animate-pop rounded-xl border border-line bg-surface p-1 shadow-pop outline-none select-none"
-      style={pos ?? { left: x, top: y, visibility: 'hidden' }}
+      className="fixed z-50 max-h-[calc(100dvh-16px)] w-64 animate-pop overflow-y-auto rounded-xl border border-line bg-surface p-1 overscroll-contain shadow-pop outline-none select-none"
+      style={pos ? { ...pos, maxHeight: 'calc(100dvh - 16px)' } : { left: x, top: y, visibility: 'hidden', maxHeight: 'calc(100dvh - 16px)' }}
     >
       {title && <div className="truncate px-2.5 pt-1.5 pb-1 text-2xs font-medium text-ink-3">{title}</div>}
       {sections.map((items, i) => (

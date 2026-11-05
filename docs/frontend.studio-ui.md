@@ -290,7 +290,8 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   a `<meta>` note (`docs/backend.chat-agent.md` "Vision mode"); the brief shown on the canvas stays
   the user's text.
 - **Context menu** (`canvas/ContextMenu.tsx`, fixed at the press point, clamped/flipped, touch rows
-  `pointer-coarse:h-11`; `MenuAction.active` = a toggle → `menuitemcheckbox` + accent): with a
+  `pointer-coarse:h-11`; `MenuAction.active` = a toggle → `menuitemcheckbox` + accent; scrollable —
+  `max-h-[calc(100dvh-16px)]` + `overflow-y-auto`, so a long menu never runs off the window height): with a
   selection — Vision mode + quick requests that **just send a message** about the
   selection (Generate variants, Improve the design, Adapt for mobile, Dark version —
   `QUICK_ACTIONS`), Describe a change… (focuses the composer), Select more / Done selecting,
@@ -309,12 +310,14 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   full `/runs/:id` page still exists.) Opened from the toolbar's More, the menu gets a last
   section "Toolbar: make horizontal / vertical" (`BarControls` passed by `onMore`). On empty canvas: Fit
   everything, Go to latest, New message, Reset layout (when anything is customised).
-- **Selection toolbar** (`canvas/SelectionBar.tsx`, essentials only since 2026-11-05): floating icon
+- **Selection toolbar** (`canvas/SelectionBar.tsx`, essentials only, updated 2026-11-05 — no count
+  badge): floating icon
   bar while the selection is non-empty. Grip (drag anywhere; double-click = back to the default
-  top-right place), count badge, Vision mode (pressed = `aria-pressed`, accent), Describe a
-  change…, Open preview (single component) | Delete from canvas, Clear | More (opens the context
-  menu beside it — everything else: quick actions, arrange, downloads, reset, rename / move, the
-  orientation toggle). Fixed
+  top-right place), Vision mode (pressed = `aria-pressed`, accent), Describe a
+  change…, Open preview (single component) | Delete from canvas, Clear, orientation toggle
+  ("Make horizontal" / "Make vertical"), More (opens the context
+  menu beside it — everything else: quick actions, arrange, downloads, reset, rename / move; the
+  orientation toggle is duplicated there as "Toolbar: make horizontal / vertical" via `BarControls` passed by `onMore`). Fixed
   thickness (46px, 54px on coarse pointers = border + p-1 + button), only the long axis scrolls
   (scrollbar hidden), position clamped into the window on render / resize; place + orientation in
   localStorage `wc-canvas-toolbar` (all chats). Same `MenuAction` objects as the menu.
