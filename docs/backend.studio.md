@@ -105,9 +105,11 @@ When `studio_defs` is empty: model_set `default` (single meta/muse-spark-1.3-con
 Input → Generator → Render → Vision+Code critics → Merge → Gate → Output, gate.continue loop edge
 back to generator.feedback, merge.critique → output.critique), rules `component-format` (cleanups/
 structure/CSS groups referencing validator codes). All published, note "seeded",
-published_by "system". Idempotent by emptiness. Plus `vision-judge` and `canvas-chat`
-(the design-chat agent, `defaults_chat.go`), both also ensured on every start of an
-already-seeded install (`ensureJudge`, `ensureChatAgent`) — 6 seeded agents.
+published_by "system". Idempotent by emptiness. Plus `vision-judge`, `canvas-chat`
+(the design-chat agent, `defaults_chat.go`) and `styleguide-generator` (vision → markdown style
+guide, `defaults_styleguide.go`, `docs/backend.styleguide.md`), all also ensured on every start of
+an already-seeded install (`ensureJudge`, `ensureChatAgent`, `ensureStyleguideAgent`) — 7 seeded
+agents (2026-11-05).
 
 ## Providers (`internal/features/llm`)
 
@@ -185,7 +187,9 @@ already-seeded install (`ensureJudge`, `ensureChatAgent`) — 6 seeded agents.
   `session:{id}`) + `/skills/{slug}/...` ro + `/rules/rules.md` ro (agent's rules as markdown) +
   `/canvas` ro when the session metadata has `thread_id` (pipeline node sessions of a chat thread;
   `canvas.Store.FS(thread)`, live view of the thread's canvas files, see `docs/backend.canvas.md`;
-  ephemeral Try sessions have no thread → no mount). The Runtime gets `*canvas.Store` via fx
+  ephemeral Try sessions have no thread → no mount) + `/styleguide/STYLEGUIDE.md` ro when the
+  session metadata has `styleguide_id` (the chat's style guide; `beforeRequest` also appends it to
+  the system prompt — `docs/backend.styleguide.md`). The Runtime gets `*canvas.Store` via fx
   (`NewRuntime(…, renderer, cv, log)`; nil disables the mount).
   Mounts are cached per session (FIFO cap 256); the material (skills/rules content) is recorded per
   agent name at build time — try sessions register their ephemeral session id → name mapping.

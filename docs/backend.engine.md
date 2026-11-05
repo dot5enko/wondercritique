@@ -17,7 +17,10 @@ in-memory DB answers parallel writers with SQLITE_LOCKED). Tests use a fake `Nod
 - `Run`: owner, `thread_id` (= id of the thread's first run), `mode` (pipeline|agent), `agent_id`,
   `reply` (chat agent answer), `context_paths` (JSON, selected
   canvas files), `canvas_folder` (default destination at start → folder used after commit),
-  `canvas_notes` (JSON, the user's canvas operations delivered to this run), pipeline def id/slug/name, pinned
+  `canvas_notes` (JSON, the user's canvas operations delivered to this run), `vision` (bool, agent
+  mode: the selection is rendered for the agent; also in list items / detail), `styleguide_id` (the
+  thread's style guide: set by the first run, copied to every later run — `docs/backend.styleguide.md`),
+  pipeline def id/slug/name, pinned
   `pipeline_version` + `pipeline_version_id` (`studio_def_versions.id`; both empty for draft test runs),
   `snapshot` (the pipeline body executed — runs never see later edits), `is_test`, `input` (JSON of
   strings; images are `wcblob://` refs), `status` (pending|running|completed|failed|cancelled|
@@ -36,10 +39,10 @@ in-memory DB answers parallel writers with SQLITE_LOCKED). Tests use a fake `Nod
 
 | Route | Notes |
 |---|---|
-| `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, agent?, thread_id?, is_test?, context_paths?}` → **201** `{id, thread_id, status}`; the run executes in the background; `agent` = agent mode |
-| `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input, context_paths (always an array), canvas_folder, mode, reply |
-| `GET /threads` | (2026-11-05, `threads.go`) chat list: `?limit` (≤100, default 30) `?offset` `?q` → `{items, next_offset}` (`null` on the last page); item = `id` (thread id), `title` (first run's trimmed `brief`, "" if none), `status` (latest run), `created_at` (first run), `updated_at` (latest run — order, newest first), `runs`. `q` = case-insensitive substring of the title, matched in Go (`strings.ToLower`, Unicode-safe; SQLite `lower()` is ASCII-only) over the viewer's thread heads (`id = thread_id`), then `thread_id IN …`; follow-up briefs are not searched. Paging = `GROUP BY thread_id ORDER BY MAX(created_at) DESC` with `limit+1`. Owner-scoped like `/runs`. Test: `threads_test.go` |
-| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) + `context_paths`, `canvas_folder`, `canvas_notes`, `canvas_paths` (live files the run committed; arrays never null), `mode`, `agent_id`, `reply` |
+| `POST /runs` | `{input, pipeline_id?, pipeline_version_id?, agent?, thread_id?, is_test?, context_paths?, vision?, styleguide_id?}` → **201** `{id, thread_id, status}`; the run executes in the background; `agent` = agent mode; `vision` = screenshots of the selection go to the agent (agent mode, 1–6 files; `docs/backend.chat-agent.md` "Vision mode"); `styleguide_id` picks a new thread's style guide (ready, own; follow-ups inherit, a different id → 400) |
+| `GET /runs` | `?limit` (≤200, default 50) `?offset` `?filter[thread_id]` → `{items, next_cursor: null}`, newest first; item = id, status, pipeline ref, iterations, best_score, usage, cost, created_at, thread_id, input, context_paths (always an array), canvas_folder, mode, reply, vision, styleguide_id |
+| `GET /threads` | (2026-11-05, `threads.go`) chat list: `?limit` (≤100, default 30) `?offset` `?q` → `{items, next_offset}` (`null` on the last page); item = `id` (thread id), `title` (first run's trimmed `brief`, "" if none), `status` (latest run), `created_at` (first run), `updated_at` (latest run — order, newest first), `runs`, `styleguide_id` (head run). `q` = case-insensitive substring of the title, matched in Go (`strings.ToLower`, Unicode-safe; SQLite `lower()` is ASCII-only) over the viewer's thread heads (`id = thread_id`), then `thread_id IN …`; follow-up briefs are not searched. Paging = `GROUP BY thread_id ORDER BY MAX(created_at) DESC` with `limit+1`. Owner-scoped like `/runs`. Test: `threads_test.go` |
+| `GET /runs/{id}` | run + `steps[]` + `artifacts[]` + `results[]` (`{artifact_id, position, score}`) + `pipeline_body` (the pinned snapshot, so non-admin viewers get node labels/types without the studio API) + `context_paths`, `canvas_folder`, `canvas_notes`, `canvas_paths` (live files the run committed; arrays never null), `mode`, `agent_id`, `reply`, `vision`, `styleguide_id` |
 | `GET /runs/{id}/events` | SSE; replays the run's history, then live; closes after `run_completed`/`run_failed`; `: ping` every 15 s. SSE requests skip the 60 s request timeout |
 | `POST /runs/{id}/cancel` | 204; 409 when already finished; a stale (not executing) pending/running row is marked cancelled |
 | `GET /artifacts/{id}/content` | blob with its stored MIME; `nosniff` + `Content-Security-Policy: … sandbox`; access follows the run's owner scoping |
@@ -152,7 +155,11 @@ present, and a run needs at least one non-empty value. `thread_id` must be a thr
 ## Agent bridge (`agentrun/node.go`)
 
 `Runtime.RunNode(ctx, NodeRequest{AgentID, Version, Draft, ModelSetID, Samples, Owner, ThreadID,
-Title, OnEvent}) (*NodeResult, error)`:
+StyleguideID, Title, OnEvent}) (*NodeResult, error)`:
+
+- `StyleguideID` (the run's, agent + pick_best nodes) → session metadata `styleguide_id`: the guide
+  is appended to the system prompt and mounted at `/styleguide/STYLEGUIDE.md`, and nested runs
+  inherit it (`docs/backend.styleguide.md`).
 
 - `ThreadID` (set by the engine for agent and pick_best judge nodes) goes into the session
   metadata (`{"owner", "thread_id"}`) and the `nodeScope`, so nested runs of the candidate tools

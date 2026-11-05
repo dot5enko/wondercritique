@@ -43,6 +43,7 @@ type Runtime struct {
 
 	vfsStore *sqlite.Store
 	db       *sql.DB
+	gdb      *gorm.DB // style guides
 
 	mu         sync.Mutex
 	builds     map[string]*agentkit.Agent // "defID|version" -> built agent
@@ -93,6 +94,7 @@ func NewRuntime(defs *studio.Store, svc *llmsvc.Service, agentStore store.Store,
 		js:         jsrun.New(jsrun.Config{}),
 		log:        log,
 		vfsStore:   vfsStore,
+		gdb:        db,
 		builds:     map[string]*agentkit.Agent{},
 		nodeBuilds: map[string]*nodeBuild{},
 		material:   map[string]*agentMaterial{},
@@ -414,12 +416,20 @@ func (r *Runtime) defRawBody(ctx context.Context, kind, id string) (json.RawMess
 }
 
 // beforeRequest is the shared request hook: attribute the request to the
-// session owner (sha256[:8], as the demo critic did) and resolve wcblob://
-// image blocks to data: URLs.
+// session owner (sha256[:8], as the demo critic did), append the session's
+// style guide to the system prompt and resolve wcblob:// image blocks to
+// data: URLs.
 func (r *Runtime) beforeRequest(ctx context.Context, sess *store.Session, req *akitllm.Request) error {
 	if owner, ok := sess.Metadata["owner"].(string); ok && owner != "" {
 		sum := sha256.Sum256([]byte(owner))
 		req.SafetyID = hex.EncodeToString(sum[:8])
+	}
+	if id, _ := sess.Metadata["styleguide_id"].(string); id != "" {
+		md, err := r.styleguideMarkdown(ctx, id)
+		if err != nil {
+			return err
+		}
+		req.System = StyleguideSystem(req.System, md)
 	}
 	for i := range req.Messages {
 		for j := range req.Messages[i].Blocks {

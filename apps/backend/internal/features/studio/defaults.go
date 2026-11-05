@@ -23,7 +23,10 @@ func SeedDefaults(ctx context.Context, store *Store, log *slog.Logger) error {
 		if err := ensureJudge(ctx, store, log); err != nil {
 			return err
 		}
-		return ensureChatAgent(ctx, store, log)
+		if err := ensureChatAgent(ctx, store, log); err != nil {
+			return err
+		}
+		return ensureStyleguideAgent(ctx, store, log)
 	}
 
 	seeded := 0
@@ -193,6 +196,10 @@ with strengths, issues and a 0-10 score when you deliver a verdict.`
 	}
 	seeded++
 	if err := ensureChatAgent(ctx, store, log); err != nil {
+		return err
+	}
+	seeded++
+	if err := ensureStyleguideAgent(ctx, store, log); err != nil {
 		return err
 	}
 	seeded++

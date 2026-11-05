@@ -18,6 +18,8 @@ type ThreadItem struct {
 	CreatedAt time.Time `json:"created_at"` // first run
 	UpdatedAt time.Time `json:"updated_at"` // latest run (the list order)
 	Runs      int       `json:"runs"`
+	// StyleguideID is the chat's style guide ("" = none).
+	StyleguideID string `json:"styleguide_id"`
 }
 
 // ThreadParams page and search GET /threads.
@@ -78,7 +80,7 @@ func (e *Engine) ListThreads(ctx context.Context, v Viewer, p ThreadParams) (ite
 		ids[i] = g.ThreadID
 	}
 	var runs []models.Run
-	if err := scoped(db, v).Select("id", "thread_id", "status", "input", "created_at").
+	if err := scoped(db, v).Select("id", "thread_id", "status", "input", "created_at", "styleguide_id").
 		Where("thread_id IN ?", ids).Order("created_at ASC, id ASC").Find(&runs).Error; err != nil {
 		return nil, false, apperr.Internal(err)
 	}
@@ -106,6 +108,7 @@ func (e *Engine) ListThreads(ctx context.Context, v Viewer, p ThreadParams) (ite
 		items = append(items, ThreadItem{
 			ID: g.ThreadID, Title: threadTitle(s.first.Input), Status: s.last.Status,
 			CreatedAt: s.first.CreatedAt, UpdatedAt: s.last.CreatedAt, Runs: g.Runs,
+			StyleguideID: s.first.StyleguideID,
 		})
 	}
 	return items, more, nil

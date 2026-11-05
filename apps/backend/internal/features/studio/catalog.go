@@ -409,6 +409,7 @@ func catalogPromptVariables() []PromptVariable {
 		{Name: "output", Description: "Custom output-contract fields (agents with a custom contract)."},
 		{Name: "criteria", Description: "Judging criteria (pick_best judges)."},
 		{Name: "variation", Description: "The direction hint of one candidate (generate_components / Agent node count)."},
+		{Name: "text", Description: "Pasted source text (the style-guide generator: guidelines, tokens, a description)."},
 	}
 }
 

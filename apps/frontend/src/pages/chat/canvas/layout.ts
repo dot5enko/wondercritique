@@ -39,21 +39,46 @@ const EMPTY: CanvasLayout = { pos: {}, scale: {}, dir: {} }
 
 /** Gap between packed items (components and nested groups). */
 export const PACK_GAP = 64
-/** Shape a packed block aims for: the screen's, within reason. */
-export const packAspect = (): number => Math.min(2, Math.max(0.75, window.innerWidth / Math.max(1, window.innerHeight)))
+/**
+ * Shape (w / h) a packed block aims for: landscape, so even a few items on a
+ * portrait screen use several columns.
+ */
+export const PACK_ASPECT = 1.6
+
+type Box = { w: number; h: number }
 
 /**
- * "Arrange to fill space": packs boxes into a block about `aspect` (w / h)
- * wide using a skyline — tallest first, each box goes to the spot where its
- * top is highest (leftmost on ties), so short boxes fill the holes next to
- * tall ones and several columns are used. Returns top-left corners relative
- * to the block's origin, in the input order.
+ * "Arrange to fill space": packs boxes into a block of about `aspect` (w / h)
+ * that leaves as little empty space as possible, using several columns. Tries
+ * block widths of 1…n of the widest boxes side by side (+ the square-root
+ * estimate) and keeps the packing whose bounding box is smallest, penalised
+ * by how far its shape is from `aspect`. Returns top-left corners relative to
+ * the block's origin, in the input order.
  */
-export function packRects(boxes: { w: number; h: number }[], gap: number, aspect: number): Point[] {
+export function packRects(boxes: Box[], gap: number, aspect: number): Point[] {
   if (boxes.length === 0) return []
+  const widths = boxes.map((b) => b.w + gap).sort((a, b) => b - a)
   const area = boxes.reduce((s, b) => s + (b.w + gap) * (b.h + gap), 0)
-  const widest = Math.max(...boxes.map((b) => b.w + gap))
-  const width = Math.max(widest, Math.sqrt(area * aspect))
+  const candidates = new Set<number>([Math.max(widths[0], Math.sqrt(area * aspect))])
+  let sum = 0
+  for (const w of widths) candidates.add((sum += w))
+  let best: { at: Point[]; score: number } | null = null
+  for (const width of candidates) {
+    const at = skyline(boxes, gap, width)
+    const w = Math.max(...at.map((p, i) => p.x + boxes[i].w))
+    const h = Math.max(...at.map((p, i) => p.y + boxes[i].h))
+    const score = w * h * (1 + Math.abs(Math.log(w / Math.max(1, h) / aspect)))
+    if (!best || score < best.score - 0.5) best = { at, score }
+  }
+  return (best as { at: Point[] }).at
+}
+
+/**
+ * Skyline packing into a block `width` wide: tallest first, each box goes to
+ * the spot where its top is highest (leftmost on ties), so short boxes fill
+ * the holes next to tall ones.
+ */
+function skyline(boxes: Box[], gap: number, width: number): Point[] {
   /** The skyline: contiguous segments [x, x + w) whose free space starts at y. */
   let sky: { x: number; w: number; y: number }[] = [{ x: 0, w: width, y: 0 }]
   const order = boxes.map((_, i) => i).sort((a, b) => boxes[b].h - boxes[a].h || boxes[b].w - boxes[a].w)

@@ -110,7 +110,14 @@ func (p *EmailCodeProvider) Start(ctx context.Context, raw json.RawMessage) (Sta
 		}
 		return nil, apperr.Unavailable("could not send the code, try again later").Wrap(err)
 	}
-	return StartResult{"sent": true, "expires_in": int(CodeTTL.Seconds())}, nil
+	res := StartResult{"sent": true, "expires_in": int(CodeTTL.Seconds())}
+	// The log mailer only exists in dev without RESEND_API_KEY (mailer.New refuses it otherwise): no email
+	// goes out, so the code is handed to the login page instead of only to the server log.
+	if _, ok := p.mailer.(*mailer.LogMailer); ok {
+		res["dev_code"] = code
+		res["dev_notice"] = "Local mode: email delivery isn't configured (no RESEND_API_KEY), so the code is shown here instead of being emailed."
+	}
+	return res, nil
 }
 
 // Verify checks the latest live code for the email. Every check counts as an attempt; after

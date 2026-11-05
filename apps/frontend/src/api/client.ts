@@ -146,7 +146,9 @@ interface AttemptOptions extends RequestOptions {
 
 async function send(method: string, path: string, body: unknown, opts: AttemptOptions): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json', ...opts.headers }
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  // FormData (uploads) sets its own multipart Content-Type with the boundary.
+  const isForm = body instanceof FormData
+  if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json'
   const session = opts.noAuth ? null : getSession()
   if (session) headers.Authorization = `Bearer ${session.access_token}`
 
@@ -155,7 +157,7 @@ async function send(method: string, path: string, body: unknown, opts: AttemptOp
     res = await fetch(`${API_ROOT}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
       signal: opts.signal,
       keepalive: opts.keepalive,
     })

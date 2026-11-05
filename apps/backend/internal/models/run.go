@@ -75,6 +75,9 @@ type Run struct {
 	// Vision (agent mode): the selected components are rendered and the
 	// screenshots go to the chat agent with the message.
 	Vision bool
+	// StyleguideID is the chat's style guide: chosen with the thread's first
+	// message, copied to every later run of the thread, never changed.
+	StyleguideID string `gorm:"size:64"`
 
 	Status         string `gorm:"index;size:16"`
 	Iteration      int

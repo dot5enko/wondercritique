@@ -1,6 +1,6 @@
 # Backend — design chat = one agent (agent-mode runs, gen_components)
 
-**State as of 2026-11-04.** The design chat (canvas) no longer runs a pipeline per message: it
+**State as of 2026-11-05** (vision mode added). The design chat (canvas) no longer runs a pipeline per message: it
 talks to one studio agent, `canvas-chat` (system prompt + tools). Generation is a tool call,
 `gen_components(count, description, …)`; every generated component becomes a result — nothing is
 judged or reduced to one. Pipelines stay (studio, explicit `pipeline_id` runs) for more complex
@@ -26,6 +26,27 @@ Verify: from `apps/backend`, `go test -race ./internal/features/engine -run Test
   earlier messages of the thread — `User:` brief, `(about …)` context paths, `You:` reply ≤ 2000
   chars, `Files created:` live canvas paths of that run, status note for failed/running; "" for
   the first message).
+
+## Vision mode (2026-11-05, `engine/vision.go`)
+
+The canvas chat agent has **no visual tool** of its own (its tools are read_file, glob, grep,
+gen_components; the render service is only used by pipeline Render / pick_best nodes and the
+canvas PNG export). Instead a message can be sent in vision mode:
+
+- `POST /runs` `vision: true` — agent mode only, needs `context_paths` resolving to 1…
+  `maxVisionShots` (6) files (400 field `vision` otherwise). Stored as `runs.vision`; `GET /runs`
+  items and run detail carry `vision`.
+- When the agent step runs (`execAgent` → `visionSamples`), each selected file is rendered with
+  `canvas.Screenshot` (the export look: 1280 stage, light, narrow content cropped) at **1x**
+  (`visionDPR`), activity "Rendering preview i/n", stored as an image artifact of the step. The
+  agent gets the refs as the prompt variable `previews` (not in the template → `BuildInput`
+  appends them as image blocks after the text) and the brief prefixed with
+  `<meta>Vision mode: the attached image(s) … in this order: <paths>. Look at … and try to fulfill
+  the user's request below, judging by what is actually rendered …</meta>` (+ files that failed to
+  render). The stored run input stays the user's text. All renders failing fails the step
+  ("could not render a preview: …").
+- History marks such messages "(you were shown screenshots of them)".
+- Test: `TestChatAgentVisionMode` (`chat_test.go`).
 
 ## `chat` output contract
 
@@ -70,6 +91,12 @@ gen_components`, input template `{{history}}\n\n{{canvas}}\n\n## Message\n\n{{br
 prompt: talk + create via gen_components; "N variants" → `count` N, keep all of them, never pick a
 best unless asked; separate calls for different kinds; `sources` to build on existing files;
 answer questions without generating; short reply after generating, no HTML in the reply.
+
+## Style guide
+
+A chat may follow a style guide picked with its first message (`styleguide_id`, fixed per
+thread): canvas-chat and its gen_components workers get it in the system prompt and at
+`/styleguide/STYLEGUIDE.md` — `docs/backend.styleguide.md`.
 
 ## Frontend
 

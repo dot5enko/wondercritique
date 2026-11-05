@@ -223,6 +223,8 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 		Owner:      nr.st.run.OwnerID,
 		ThreadID:   nr.st.run.ThreadID,
 		Title:      fmt.Sprintf("%s · %s", nr.st.run.PipelineName, nr.st.g.label(nr.node.ID)),
+
+		StyleguideID: nr.st.run.StyleguideID,
 	}
 	if count := int(numCfg(cfg, "count", 1)); count > 1 {
 		return nr.execAgentCandidates(ctx, req, count, sink)
@@ -852,7 +854,8 @@ func (nr *nodeRun) execPickBest(ctx context.Context) (*nodeResult, error) {
 	v, err := agentrun.Judge(ctx, nr.st.e.Agents.RunNode, agentrun.JudgeRequest{
 		Base: agentrun.NodeRequest{
 			AgentID: judgeID, Draft: nr.st.run.IsTest, Owner: nr.st.run.OwnerID, ThreadID: nr.st.run.ThreadID,
-			Title: fmt.Sprintf("%s · %s", nr.st.run.PipelineName, nr.st.g.label(nr.node.ID)),
+			StyleguideID: nr.st.run.StyleguideID,
+			Title:        fmt.Sprintf("%s · %s", nr.st.run.PipelineName, nr.st.g.label(nr.node.ID)),
 		},
 		Brief:      brief,
 		Criteria:   strCfg(cfg, "criteria", ""),

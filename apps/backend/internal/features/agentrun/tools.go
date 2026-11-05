@@ -1,7 +1,7 @@
 // Agent tool construction (plan §4.4 allowlist → catalog tools). File tools
 // and run_js operate on a SESSION-scoped VFS: /work read-write (one sqlite
 // workspace per session id) plus read-only /skills/{slug}/, /rules/ and, for
-// pipeline sessions of a chat thread, /canvas mounts.
+// pipeline sessions of a chat thread, /canvas and /styleguide mounts.
 package agentrun
 
 import (
@@ -303,10 +303,11 @@ func (r *Runtime) sessionMount(ctx context.Context, sessionID string) (vfs.FS, b
 	// Which agent owns this session? Shared-store sessions record the agent
 	// name; try-run sessions are looked up in the ephemeral map.
 	sess, err := r.agentStore.GetSession(ctx, sessionID)
-	agentName, thread := "", ""
+	agentName, thread, styleguide := "", "", ""
 	if err == nil {
 		agentName = sess.Agent
 		thread, _ = sess.Metadata["thread_id"].(string)
+		styleguide, _ = sess.Metadata["styleguide_id"].(string)
 	} else {
 		r.ephemeralMu.RLock()
 		agentName = r.ephemeral[sessionID]
@@ -341,6 +342,19 @@ func (r *Runtime) sessionMount(ctx context.Context, sessionID string) (vfs.FS, b
 	// Pipeline sessions of a chat thread read its canvas (never write it).
 	if thread != "" && r.canvas != nil {
 		points = append(points, vfs.MountPoint{Prefix: "/canvas", FS: r.canvas.FS(thread), ReadOnly: true})
+	}
+	// The chat's style guide, read-only (also in the system prompt).
+	if styleguide != "" {
+		md, err := r.styleguideMarkdown(ctx, styleguide)
+		if err != nil {
+			return nil, false, err
+		}
+		if md != "" {
+			points = append(points, vfs.MountPoint{
+				Prefix: StyleguideDir,
+				FS:     vfs.ReadOnly(memoryFS(map[string][]byte{StyleguideFile: []byte(md)})),
+			})
+		}
 	}
 	mnt, err = vfs.NewMount(points...)
 	if err != nil {

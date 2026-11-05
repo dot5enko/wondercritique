@@ -115,6 +115,9 @@ const (
 	DefaultWorkerSlug = "component-generator"
 	// ChatAgentSlug is the agent the design chat talks to.
 	ChatAgentSlug = "canvas-chat"
+	// StyleguideAgentSlug is the vision agent that writes style guides from
+	// sample images.
+	StyleguideAgentSlug = "styleguide-generator"
 )
 
 // GenerateConfig returns the generate_components config (never nil).

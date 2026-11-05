@@ -35,7 +35,7 @@ chat, no sidebar on chat routes). Base stack unchanged.
 | `/login` | public | email-code login (start → verify, resend countdown from 60 s / `Retry-After`) |
 | `/setup` | admin, no shell | first-run wizard (2026-11-05): provider (openrouter/meta) + API key + test, Meta-family model → published `default` model set, done; `SetupGate` (in `AuthProvider`) redirects admins with `needs_setup` here; re-runnable, shows "already set up" when a ready provider exists |
 | `/` | auth | redirect → `/chat` |
-| `/chat` | auth, **no shell** | chat list: search + full-width "New chat" first row + chats in chunks with a "Load more" pill (`pages/chat/index.tsx`, `GET /threads`); legacy `?thread=x` redirects (loader) to `/chat/x` |
+| `/chat` | auth, **no shell** | chat list: style-guide pills (create / tap → `/chat/new?styleguide=<id>`, see `docs/frontend.studio-ui.md` "Style guides") + search + full-width "New chat" first row + chats in chunks with a "Load more" pill (`pages/chat/index.tsx`, `GET /threads`); legacy `?thread=x` redirects (loader) to `/chat/x` |
 | `/chat/:threadId` | auth, **no shell** | full-screen design canvas of one chat (`pages/chat/canvas/`, see `docs/frontend.studio-ui.md`); `threadId = new` is a new chat (a param value, not its own route, so the canvas stays mounted when the first message turns it into `/chat/<thread>`) |
 | `/runs/:id` | auth | full run detail (`RunDetailView` from `src/pages/runs/detail.tsx`; also embedded in the canvas drawer). `/runs` redirects to `/chat` |
 | `/studio/pipelines` | admin | list + `?id=` graph editor (`src/pages/studio/pipelines/`) |

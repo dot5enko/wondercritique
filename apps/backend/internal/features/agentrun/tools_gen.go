@@ -72,7 +72,7 @@ func (e toolEnv) genTool() tool.Tool {
 			delete(samples, k)
 		}
 		samples["brief"] = strings.TrimSpace(in.Description)
-		base := NodeRequest{AgentID: workerID, Draft: e.self.Draft, Owner: e.owner(ctx), ThreadID: e.thread(ctx), Title: "gen_components", Samples: samples}
+		base := NodeRequest{AgentID: workerID, Draft: e.self.Draft, Owner: e.owner(ctx), ThreadID: e.thread(ctx), StyleguideID: e.styleguide(ctx), Title: "gen_components", Samples: samples}
 
 		sources := make([]string, 0, len(in.Sources))
 		if len(in.Sources) > 0 {

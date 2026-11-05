@@ -114,7 +114,9 @@ type nodeScope struct {
 	samples map[string]any
 	owner   string
 	thread  string // chat thread (canvas mount) passed on to nested runs
-	worker  bool   // the agent runs as a generate_components worker
+	// styleguide is the chat's style guide id, passed on to nested runs.
+	styleguide string
+	worker     bool // the agent runs as a generate_components worker
 }
 
 func withScope(ctx context.Context, s nodeScope) context.Context {

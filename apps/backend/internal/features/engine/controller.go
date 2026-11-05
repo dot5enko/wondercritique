@@ -62,6 +62,8 @@ type startRequest struct {
 	ContextPaths []string `json:"context_paths"`
 	// Vision sends rendered previews of the selected components along.
 	Vision bool `json:"vision"`
+	// StyleguideID picks the style guide of a new chat (fixed per thread).
+	StyleguideID string `json:"styleguide_id"`
 }
 
 // start answers 201 `{id, thread_id, status}`; the run executes in the
@@ -81,6 +83,7 @@ func (c *Controller) start(w http.ResponseWriter, r *http.Request) error {
 		Input:             req.Input,
 		ContextPaths:      req.ContextPaths,
 		Vision:            req.Vision,
+		StyleguideID:      req.StyleguideID,
 	})
 	if err != nil {
 		return err

@@ -58,6 +58,11 @@ export interface StartRunBody {
    * server-side and the screenshots go to the agent with the message.
    */
   vision?: boolean
+  /**
+   * Style guide of a NEW chat (`GET /styleguides`, must be ready). Follow-ups
+   * inherit the thread's; a different id is a 400.
+   */
+  styleguide_id?: string
 }
 
 /** POST /runs → 201 `{id, thread_id, status}`; the run executes in the background. */
@@ -97,6 +102,8 @@ export interface RunListItem {
   reply?: string
   /** The agent was shown screenshots of the selection (vision mode). */
   vision?: boolean
+  /** The chat's style guide ("" = none; the same on every run of a thread). */
+  styleguide_id?: string
 }
 
 export type RunMode = 'pipeline' | 'agent'
@@ -133,6 +140,8 @@ export interface ThreadListItem {
   /** Latest run — the list order (newest first). */
   updated_at: string
   runs: number
+  /** The chat's style guide ("" = none). */
+  styleguide_id?: string
 }
 
 export interface ListThreadsParams {
@@ -293,6 +302,8 @@ export interface Run {
   reply?: string
   /** Vision mode: the agent was shown screenshots of the selection. */
   vision?: boolean
+  /** The chat's style guide ("" = none). */
+  styleguide_id?: string
   steps: RunStep[]
   artifacts: Artifact[]
   /** Results in display order: one (the selected artifact) or every component of a multi-component result. */

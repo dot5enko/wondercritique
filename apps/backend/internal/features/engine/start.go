@@ -41,6 +41,9 @@ type StartParams struct {
 	// Vision (agent mode) renders the selected components and gives the
 	// agent the screenshots with the message.
 	Vision bool
+	// StyleguideID picks the style guide of a new chat; follow-ups inherit
+	// the thread's (a different one is rejected).
+	StyleguideID string
 }
 
 const (
@@ -113,6 +116,9 @@ func (e *Engine) Start(ctx context.Context, p StartParams) (*models.Run, error) 
 	run.CanvasFolder = folder
 	for _, f := range cr.selected {
 		run.ContextPaths = append(run.ContextPaths, f.Path)
+	}
+	if run.StyleguideID, err = e.resolveStyleguide(ctx, p); err != nil {
+		return nil, err
 	}
 	if p.Vision {
 		switch {
@@ -449,6 +455,45 @@ func (e *Engine) checkThread(ctx context.Context, p StartParams) error {
 		return apperr.NotFound("chat thread not found")
 	}
 	return nil
+}
+
+// resolveStyleguide returns the style guide of the new run. A follow-up
+// inherits the thread's (picked with its first message; asking for another
+// one is a 400). A new thread may pick a ready guide the caller owns (admins:
+// any).
+func (e *Engine) resolveStyleguide(ctx context.Context, p StartParams) (string, error) {
+	field := func(msg string) error {
+		return apperr.Invalid("invalid style guide", map[string]string{"styleguide_id": msg})
+	}
+	if p.ThreadID != "" {
+		var head models.Run
+		err := e.DB.WithContext(ctx).Select("styleguide_id").First(&head, "id = ?", p.ThreadID).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", apperr.Internal(err)
+		}
+		if p.StyleguideID != "" && p.StyleguideID != head.StyleguideID {
+			return "", field("the style guide of a chat can't be changed")
+		}
+		return head.StyleguideID, nil
+	}
+	if p.StyleguideID == "" {
+		return "", nil
+	}
+	var sg models.Styleguide
+	q := e.DB.WithContext(ctx).Select("id", "owner_id", "status").Where("id = ?", p.StyleguideID)
+	if !p.Admin {
+		q = q.Where("owner_id = ?", p.UserID)
+	}
+	if err := q.First(&sg).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", field("style guide not found")
+		}
+		return "", apperr.Internal(err)
+	}
+	if sg.Status != models.StyleguideReady {
+		return "", field("the style guide is not ready yet")
+	}
+	return sg.ID, nil
 }
 
 // briefOf picks the main text of a run input: `brief`, else the first

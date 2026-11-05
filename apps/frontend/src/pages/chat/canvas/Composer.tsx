@@ -1,11 +1,12 @@
 /**
  * Floating message composer of the canvas: the selected components/groups as
  * removable chips (they travel with the message as context), a vision-mode
- * banner (previews of the selection go along), an auto-growing
+ * banner (previews of the selection go along), an optional accessory row (the
+ * chat's style guide: picker in a new chat, locked pill after), an auto-growing
  * textarea (16px so iOS doesn't zoom on focus) and Send. Enter sends,
  * Shift+Enter breaks the line.
  */
-import { useLayoutEffect, type RefObject } from 'react'
+import { useLayoutEffect, type ReactNode, type RefObject } from 'react'
 import { ArrowUp, Eye, X } from 'lucide-react'
 import { Button, IconButton, Spinner, cx } from '../../../ui'
 
@@ -29,6 +30,7 @@ export function Composer({
   onVisionOff,
   inputRef,
   placeholder,
+  accessory,
 }: {
   value: string
   onChange: (v: string) => void
@@ -45,6 +47,8 @@ export function Composer({
   onVisionOff: () => void
   inputRef: RefObject<HTMLTextAreaElement | null>
   placeholder: string
+  /** Rendered above the chips (style guide picker / pill). */
+  accessory?: ReactNode
 }) {
   useLayoutEffect(() => {
     const el = inputRef.current
@@ -78,6 +82,7 @@ export function Composer({
             </button>
           </div>
         )}
+        {accessory != null && <div className="flex min-w-0 items-center gap-1.5 px-2 pt-1">{accessory}</div>}
         {chips.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1">
             {chips.map((c) => (

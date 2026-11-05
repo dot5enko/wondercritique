@@ -24,7 +24,7 @@ import { RunProgress } from '../RunProgress'
 import { ComponentFrame, FRAME_WIDTH, FrameHandles } from './ComponentFrame'
 import { componentsOf, useRunLive } from './useRunLive'
 import { componentLabel, folderLabel, type FolderNode } from './tree'
-import { PACK_GAP, packAspect, packRects, type CanvasLayout, type GroupDir } from './layout'
+import { PACK_ASPECT, PACK_GAP, packRects, type CanvasLayout, type GroupDir } from './layout'
 
 const ITEMS_LAYOUT: Record<GroupDir | 'wrap', string> = {
   wrap: 'max-w-[5400px] flex-wrap',
@@ -38,7 +38,7 @@ const ITEMS_LAYOUT: Record<GroupDir | 'wrap', string> = {
 function packItems(kids: HTMLElement[]): { w: number; h: number } {
   for (const el of kids) el.style.width = 'max-content'
   const mt = kids.map((el) => parseFloat(getComputedStyle(el).marginTop || '0'))
-  const at = packRects(kids.map((el, i) => ({ w: el.offsetWidth, h: el.offsetHeight + mt[i] })), PACK_GAP, packAspect())
+  const at = packRects(kids.map((el, i) => ({ w: el.offsetWidth, h: el.offsetHeight + mt[i] })), PACK_GAP, PACK_ASPECT)
   let w = 0
   let h = 0
   kids.forEach((el, i) => {

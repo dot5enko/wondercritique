@@ -18,6 +18,7 @@ export interface ThreadSummary {
   /** ISO time of the thread's latest run. */
   at: string
   runs: number
+  styleguideId: string
 }
 
 /** Title of a chat: its first brief, else its start date. */
@@ -27,7 +28,7 @@ export function threadTitle(brief: string, createdAt: string): string {
 
 /** A `GET /threads` item as shown in the lists. */
 export function threadSummary(t: ThreadListItem): ThreadSummary {
-  return { id: t.id, title: threadTitle(t.title, t.created_at), status: t.status, at: t.updated_at, runs: t.runs }
+  return { id: t.id, title: threadTitle(t.title, t.created_at), status: t.status, at: t.updated_at, runs: t.runs, styleguideId: t.styleguide_id ?? '' }
 }
 
 export function ThreadList({

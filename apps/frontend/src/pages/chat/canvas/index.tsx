@@ -16,7 +16,7 @@
  * tells the next run about it).
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -72,6 +72,7 @@ import {
 } from '../../../api/canvas'
 import { saveFile } from '../../../api/client'
 import { threadTitle } from '../rail'
+import { LockedStyleguide, StyleguidePicker, useStyleguides } from '../styleguides'
 import { useViewport, type HandleInfo, type MenuInfo, type TapInfo } from './useViewport'
 import { FolderGroup, type GroupEnv } from './FolderGroup'
 import { buildTree, componentLabel, filesBelow, folderLabel, indexFolders, topGroups, type FolderNode } from './tree'
@@ -79,7 +80,7 @@ import { ContextMenu, type MenuAction } from './ContextMenu'
 import { SelectionBar, type BarControls } from './SelectionBar'
 import { Composer, type ContextChip } from './Composer'
 import { loadComponentHtml, setCanvasMotion, useComponentHtml } from './ComponentFrame'
-import { hasArrangement, MAX_SCALE, MIN_SCALE, PACK_GAP, packAspect, packRects, useCanvasLayout, type GroupDir, type Point } from './layout'
+import { hasArrangement, MAX_SCALE, MIN_SCALE, PACK_ASPECT, PACK_GAP, packRects, useCanvasLayout, type GroupDir, type Point } from './layout'
 
 const EXAMPLES = [
   'A pricing section with three tiers, dark theme, rounded cards',
@@ -506,6 +507,21 @@ export default function CanvasPage() {
     if (selection.length === 0) setVision(false)
   }, [selection.length])
 
+  /* ---------- style guide (picked for a new chat, fixed after) ---------- */
+
+  const { guides, byId: guideById } = useStyleguides()
+  const [searchParams] = useSearchParams()
+  const guideParam = searchParams.get('styleguide') ?? ''
+  const [pickedGuide, setPickedGuide] = useState(guideParam)
+  useEffect(() => setPickedGuide(guideParam), [guideParam, threadId])
+  /** The chat's guide ("" = none; null while a new chat has none yet). */
+  const threadGuide = threadId ? (runs[0]?.styleguide_id ?? '') : null
+  const guideAccessory = threadGuide != null ? (
+    threadGuide ? <LockedStyleguide name={guideById.get(threadGuide)?.name ?? 'Style guide'} /> : null
+  ) : guides.length > 0 || pickedGuide ? (
+    <StyleguidePicker guides={guides} value={pickedGuide} onChange={setPickedGuide} />
+  ) : null
+
   /** Sends a message about `paths` (files / folders of the canvas); `look` = with previews. */
   const send = async (message: string, paths: string[], look = false): Promise<void> => {
     const brief = message.trim()
@@ -530,6 +546,8 @@ export default function CanvasPage() {
         ...(threadId ? { thread_id: threadId } : {}),
         ...(contextPaths.length > 0 ? { context_paths: contextPaths } : {}),
         ...(withVision ? { vision: true } : {}),
+        // a new chat picks its guide; follow-ups inherit it server-side
+        ...(!threadId && pickedGuide ? { styleguide_id: pickedGuide } : {}),
       })
       setText('')
       setSelection([])
@@ -569,7 +587,7 @@ export default function CanvasPage() {
     const y0 = Math.min(...items.map((i) => i.r.y))
     const out: Record<string, Point> = {}
     if (dir === 'pack') {
-      const at = packRects(items.map((i) => ({ w: i.r.w, h: i.r.h })), gap, packAspect())
+      const at = packRects(items.map((i) => ({ w: i.r.w, h: i.r.h })), gap, PACK_ASPECT)
       items.forEach(({ k, r, off }, i) => {
         out[k] = { x: off.x + x0 + at[i].x - r.x, y: off.y + y0 + at[i].y - r.y }
       })
@@ -1049,6 +1067,7 @@ export default function CanvasPage() {
         vision={vision && selection.length > 0}
         onVisionOff={() => setVision(false)}
         inputRef={inputRef}
+        accessory={guideAccessory}
         placeholder={
           vision && selection.length > 0
             ? 'Ask about how it looks…'

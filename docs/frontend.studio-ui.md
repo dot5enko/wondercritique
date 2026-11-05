@@ -1,6 +1,6 @@
 # Frontend — Studio, Runs, Design chat sections
 
-State as of 2026-11-05 (design chat = full-screen canvas over the thread's shared file tree — folders = groups, server-stored layout, see `docs/backend.canvas.md`; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
+State as of 2026-11-05 (vision mode, essentials-only toolbar, "Arrange to fill space"; design chat = full-screen canvas over the thread's shared file tree — folders = groups, server-stored layout, see `docs/backend.canvas.md`; runs served by the engine, `docs/backend.engine.md`). Feature-level reference for the pages built on the base app
 (see `docs/frontend.md` for stack/router/API-layer/auth). All data fetching goes through
 `src/api/*`; shared UI from `src/components/*`; forms bound via `useDirtyDraft` with
 debounced autosave to `PUT /studio/{kind}/{id}/draft` and `VersionBar` for publishing.
@@ -137,7 +137,7 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
 (`groupThreads`) are still used). Full screen, no Shell/sidebar, touch-first (tablet/phone).
 
 - **Chat list** (`pages/chat/index.tsx`, updated 2026-11-05): header (app name, Settings icon for
-  admins → studio, logout) + search `Input` (250 ms debounce, clear X / Esc) + one list card whose
+  admins → studio, logout) + **style-guide pills** (below) + search `Input` (250 ms debounce, clear X / Esc) + one list card whose
   **first row is a full-width "New chat"** (→ `/chat/new`), then the chats (status dot, title,
   relative time, message count) → `/chat/<id>`. Data: `usePagedThreads(search)` (`threads.tsx`) —
   `GET /threads` chunks of `THREADS_PAGE` (20), a new search restarts from offset 0 (superseded
@@ -145,7 +145,19 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   more" pill** under the card while `next_offset != null` (spinner while loading, "Couldn't load —
   retry" after a failed chunk). Search matches in titles are wrapped in `<mark>` `bg-yellow-200`
   (`Highlight`, case-insensitive regex). Empty search → `No chats match “…”`. The list page is not
-  under a `ThreadsProvider` any more; it refetches on every mount.
+  under a `ThreadsProvider` any more; it refetches on every mount. Chat rows show the chat's style
+  guide name (palette icon) after the time when `styleguide_id` resolves in the user's list.
+- **Style guides** (`pages/chat/styleguides.tsx`, `api/styleguides.ts`, 2026-11-05; backend
+  `docs/backend.styleguide.md`): `useStyleguides()` lists `GET /styleguides` and re-polls every 3 s
+  while any guide is `generating` (`upsert`/`remove` for optimistic updates). `StyleguidePills`
+  (horizontal scroll row): dashed "+ Style guide" → `CreateStyleguideModal` (drop / choose ≤ 4
+  images ≤ 8 MB with thumbnails, optional name + notes → multipart `createStyleguide` via
+  `apiPost(FormData)` — `api/client.ts` `send` passes FormData through without a JSON
+  Content-Type); one pill per guide: tap a ready one → `/chat/new?styleguide=<id>`; a generating one
+  shows a spinner ("Generating…" until named), a failed one is red; the "…" (and taps on non-ready
+  ones) opens `StyleguideModal` (sample thumbnails via `styleguideImageURL` object URLs, notes,
+  generating / failed callouts, rendered markdown; Edit / "Write by hand" → name + markdown
+  textarea → PATCH; Regenerate; Delete with `ConfirmDialog`; "Start a chat").
 - **Canvas page** (`pages/chat/canvas/index.tsx`): one chat. Model: **folder = group**, **file =
   component** — the canvas is a view of `GET /threads/{id}/canvas` (`api/canvas.ts`), the same
   files the agents read under `/canvas`. Data: the canvas (files + layout) **and** the thread's
@@ -261,12 +273,21 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   paths (folders as folder paths — the server expands them; the root group `g:/` sends its direct
   files), client-side cap 12 files after expansion (error in the composer). Sending is allowed while
   other runs are going; the first message of `/chat/new` navigates (replace) to `/chat/<thread>`.
-  Try again resends the brief with the run's `context_paths` that still exist.
+  Try again resends the brief with the run's `context_paths` that still exist (and its `vision`).
+- **Vision mode** (2026-11-05): a toggle (`vision` state, Eye icon; menu + toolbar `visionAction`,
+  disabled with no components or > `MAX_VISION_FILES` = 6, hint `max 6`) that arms the **next
+  message** — composer banner "Vision mode — the agent sees a rendered preview of the selection"
+  with an X, placeholder "Ask about how it looks…". `send(message, paths, look)` adds `vision: true`
+  to `startRun` (quick actions sent while armed carry it too); off after sending and whenever the
+  selection empties. The server renders the selection and gives the agent the screenshots +
+  a `<meta>` note (`docs/backend.chat-agent.md` "Vision mode"); the brief shown on the canvas stays
+  the user's text.
 - **Context menu** (`canvas/ContextMenu.tsx`, fixed at the press point, clamped/flipped, touch rows
-  `pointer-coarse:h-11`): with a selection — quick requests that **just send a message** about the
+  `pointer-coarse:h-11`; `MenuAction.active` = a toggle → `menuitemcheckbox` + accent): with a
+  selection — Vision mode + quick requests that **just send a message** about the
   selection (Generate variants, Improve the design, Adapt for mobile, Dark version —
   `QUICK_ACTIONS`), Describe a change… (focuses the composer), Select more / Done selecting,
-  Arrange vertically / horizontally (only when arranging applies), Reset position & size, **Rename
+  Arrange to fill space / vertically / horizontally (only when arranging applies), Reset position & size, **Rename
   folder…** (one non-root group: prompt → `moveCanvasPath(folder, parent/name)`),
   **Move to folder…** (components only: prompt with a folder path → one move per file), Delete from
   canvas, **Show message & reply** (one group / component whose origin run is in the thread:
@@ -278,14 +299,15 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   HTML / Download PNG @2x** (see Downloads), Clear selection. Chips, menu title and preview title
   use `componentLabel` (no `.html`). (No run-details drawer /
   Details buttons on the canvas since 2026-11-05 — agent + tools runs made them obsolete; the
-  full `/runs/:id` page still exists.) On empty canvas: Fit
+  full `/runs/:id` page still exists.) Opened from the toolbar's More, the menu gets a last
+  section "Toolbar: make horizontal / vertical" (`BarControls` passed by `onMore`). On empty canvas: Fit
   everything, Go to latest, New message, Reset layout (when anything is customised).
-- **Selection toolbar** (`canvas/SelectionBar.tsx`): floating icon bar while the selection is
-  non-empty. Grip (drag anywhere; double-click = back to the default top-right place), count badge,
-  Arrange vertically / horizontally (only when applicable — see Canvas layout), the 4 quick
-  actions, Open preview (single component), Download HTML / PNG @2x, Reset position & size, Rename
-  folder / Move to folder (when applicable), Delete from canvas, Clear, vertical ↔ horizontal
-  toggle, More (opens the context menu beside it). Fixed
+- **Selection toolbar** (`canvas/SelectionBar.tsx`, essentials only since 2026-11-05): floating icon
+  bar while the selection is non-empty. Grip (drag anywhere; double-click = back to the default
+  top-right place), count badge, Vision mode (pressed = `aria-pressed`, accent), Describe a
+  change…, Open preview (single component) | Delete from canvas, Clear | More (opens the context
+  menu beside it — everything else: quick actions, arrange, downloads, reset, rename / move, the
+  orientation toggle). Fixed
   thickness (46px, 54px on coarse pointers = border + p-1 + button), only the long axis scrolls
   (scrollbar hidden), position clamped into the window on render / resize; place + orientation in
   localStorage `wc-canvas-toolbar` (all chats). Same `MenuAction` objects as the menu.
@@ -308,12 +330,28 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   (IME-safe), circular primary Send `IconButton` (`size="lg"` = square 36px, `rounded-full!`,
   ArrowUp / Spinner while sending). Note: `cx` doesn't merge classes, so overriding the base
   `rounded-md` needs the `!` important suffix (Tailwind v4 orders same-property utilities itself).
-  (2026-11-04)
+  (2026-11-04). Optional `accessory` row above the chips = the chat's **style guide**
+  (2026-11-05): a new chat shows `StyleguidePicker` (pill "No style guide" / guide name, opens a
+  list **upwards** with None + guides, non-ready ones disabled; preselected from `?styleguide=`)
+  when the user has guides; the first message sends `styleguide_id`. An existing chat shows
+  `LockedStyleguide` (name + lock, from `runs[0].styleguide_id`); follow-ups never send the id
+  (the server inherits it). No guide on an existing chat → no row.
 - Render cost: `FolderGroup`/`PendingCard`/`ComponentFrame` are memoized and the page's callbacks
   are stable (`retry` via a ref), so typing in the composer doesn't re-render groups and selection /
   layout changes don't re-render frames.
 - Auto-fit "latest": the top group holding the newest running message's card, else the newest file.
-- Smoke (2026-11-05): `node tmp/canvas-smoke/smoke.mjs apps/frontend/dist tmp/canvas-smoke/out` —
+- Smoke (2026-11-05): `node tmp/canvas-smoke/smoke.mjs <dist> tmp/canvas-smoke/out` — build a
+  same-origin bundle for it first (`VITE_API_BASE_URL= npx vite build --outDir
+  ../../tmp/canvas-smoke/dist`; `apps/frontend/dist` may be a production build pointing at the real
+  API). Stubs `GET /threads` for the list page; actions moved off the toolbar go through `viaMore`
+  (More → menu item); checks toolbar essentials, vision mode (banner, `vision: true` posted with the
+  selection, off after send) and pack (`dir` saved, ≥ 2 columns, no overlap, block wraps), and
+  style guides (12 checks, 2026-11-05: R1 has guide `S1`; pills + chat-row name, new-chat picker,
+  locked pill + no id on follow-ups, multipart upload from the create modal, generating pill →
+  polled ready "Sunset", details modal sample image, pill → `/chat/new?styleguide=S2` → first
+  message posts `styleguide_id`, picker → None posts none). Known
+  stale checks after the label / header changes of 2026-11-05 (header origin text, `.html` chip
+  labels, header taps that now land on a component). Runs —
   playwright-core (installed in `tmp/canvas-smoke`) drives `/usr/bin/google-chrome` headless as a
   touch tablet (820×1180), serving `dist` and a stubbed `/api/v1` purely through `context.route`
   (no dev server, no backend): runs (each POST → running run `R<n>` with `canvas_folder
@@ -345,13 +383,24 @@ created thread. Only the toolbar place stays in localStorage.
   move/arrange stores every top group's current place first (`groupPlaces`), so nothing jumps.
 - `scale[file]` = uniform scale from the resize handle (0.25–4, the corner follows the axis dragged
   further; ≈1 dropped).
-- `dir[folder]` = `row` | `col` flow of a folder's items (default wrap).
+- `dir[folder]` = `row` | `col` | `pack` flow of a folder's items (default wrap). **`pack`** (2026-11-05,
+  "Arrange to fill space"): `FolderGroup`'s layout effect places the items absolutely
+  (`packItems`: `width: max-content`, top-left from `packRects`, label margin counted) and sizes
+  the items box to the packed block (+ the padding around moved items); re-packed on every item
+  resize (the first fit runs synchronously in the layout effect — no flash of the flex flow);
+  `unpackItems` restores the flex flow when `dir` changes.
+- `packRects(boxes, gap, aspect)` (`layout.ts`): skyline packing (tallest first, each box where its
+  top is highest, leftmost on ties) tried at block widths of the 1…n widest boxes side by side +
+  √(area·aspect); keeps the one with the smallest bounding box × (1 + |ln(shape / aspect)|).
+  `PACK_ASPECT` = 1.6 (landscape, so a few items on a portrait tablet still use several columns),
+  `PACK_GAP` = 64.
 - Drags are imperative (page `onHandle`: `translate` + `data-dx/dy`, or box size + doc `scale()`;
   `data-dragging` → z-30) and committed to the layout on release (`cancel` restores).
-- **Arrange** (`arrange(dir)`): one group → its `dir`, its items' offsets cleared; several top
-  groups → lined up (`lineUp`: current visual order, from the top-left-most corner, gap 160); ≥ 2
-  items (components / nested groups) of one folder → lined up inside it (gap 64 row / 80 col); all
-  of a folder's items → its `dir`. Offered only when one of these applies.
+- **Arrange** (`arrange(dir)`, dir = `pack` | `col` | `row`): one group → its `dir`, its items'
+  offsets cleared; several top groups → lined up (`lineUp`: current visual order, from the
+  top-left-most corner, gap 160; `pack` → offsets from `packRects` of their current rects); ≥ 2
+  items (components / nested groups) of one folder → lined up / packed inside it (gap 64 row and
+  pack / 80 col); all of a folder's items → its `dir`. Offered only when one of these applies.
 - Reset position & size: components → offset + scale; groups → `dir` + their items (the group's
   own place stays). Empty-canvas "Reset layout" clears everything (back to the stack).
 

@@ -134,6 +134,9 @@ type NodeRequest struct {
 	// ThreadID is the chat thread of the run; its canvas is mounted read-only
 	// at /canvas for the agent ("" = no canvas).
 	ThreadID string
+	// StyleguideID is the chat's style guide: appended to the system prompt
+	// and mounted at /styleguide/STYLEGUIDE.md ("" = none).
+	StyleguideID string
 	// OnEvent observes the agent's run events (optional).
 	OnEvent func(agentkit.Event)
 	// Extra blocks are appended to the built input message (variation hints,
@@ -317,7 +320,7 @@ func (r *Runtime) RunNode(ctx context.Context, req NodeRequest) (*NodeResult, er
 	first := BuildInput(res.Body.InputTemplate, req.Samples, false)
 	first.Blocks = append(first.Blocks, req.Extra...)
 	msgs := []llm.Message{first}
-	ctx = withScope(ctx, nodeScope{samples: req.Samples, owner: req.Owner, thread: req.ThreadID, worker: req.Worker})
+	ctx = withScope(ctx, nodeScope{samples: req.Samples, owner: req.Owner, thread: req.ThreadID, styleguide: req.StyleguideID, worker: req.Worker})
 	for attempt := 0; ; attempt++ {
 		text, usage, steps, err := drive(ctx, nb.agent, sess.ID, msgs, req.OnEvent)
 		out.Usage.Add(usage)
@@ -337,12 +340,15 @@ func (r *Runtime) RunNode(ctx context.Context, req NodeRequest) (*NodeResult, er
 	}
 }
 
-// sessionMetadata is what a node session records: the owner (safety id) and
-// the thread whose canvas the session mounts.
+// sessionMetadata is what a node session records: the owner (safety id), the
+// thread whose canvas the session mounts and the style guide it follows.
 func sessionMetadata(req NodeRequest) map[string]any {
 	md := map[string]any{"owner": req.Owner}
 	if req.ThreadID != "" {
 		md["thread_id"] = req.ThreadID
+	}
+	if req.StyleguideID != "" {
+		md["styleguide_id"] = req.StyleguideID
 	}
 	return md
 }

@@ -584,7 +584,7 @@ func TestSeedDefaultsIdempotent(t *testing.T) {
 	if err := SeedDefaults(ctx, h.store, log); err != nil {
 		t.Fatal(err)
 	}
-	for kind, want := range map[string]int{KindModelSet: 1, KindAgent: 6, KindPipeline: 1, KindRule: 1, KindSkill: 0} {
+	for kind, want := range map[string]int{KindModelSet: 1, KindAgent: 7, KindPipeline: 1, KindRule: 1, KindSkill: 0} {
 		defs, err := h.store.List(ctx, kind)
 		if err != nil {
 			t.Fatal(err)

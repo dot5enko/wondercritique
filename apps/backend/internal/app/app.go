@@ -16,6 +16,7 @@ import (
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/messages"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/render"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/features/studio"
+	"github.com/dot5enko/wondercritique/apps/backend/internal/features/styleguide"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/dbx"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/httpx"
 	"github.com/dot5enko/wondercritique/apps/backend/internal/platform/logger"
@@ -39,6 +40,7 @@ var Module = fx.Options(
 	canvas.Module,
 	agentrun.Module,
 	engine.Module,
+	styleguide.Module,
 	render.Module,
 	blobs.Module,
 )

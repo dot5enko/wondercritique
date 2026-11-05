@@ -32,7 +32,7 @@ Verify: from `apps/backend`, `go test -race ./internal/features/canvas` (temp-fi
   Partial unique index `idx_canvas_live (thread_id, path) WHERE deleted_at IS NULL` (gorm `where:`
   index option) + checks inside the write transactions.
 - `CanvasState` (`canvas_states`, PK `thread_id`): `OwnerID`, `Layout` (JSON: `pos` map
-  `"g:<folder>"|"c:<file>" → {x,y}`, `scale` file → number, `dir` folder → `row|col`), `Notes`
+  `"g:<folder>"|"c:<file>" → {x,y}`, `scale` file → number, `dir` folder → `row|col|pack`), `Notes`
   (JSON `[{id, text, at}]`, pending = not yet delivered), `UpdatedAt`. Saved with `db.Save`
   (update, else insert).
 
@@ -65,7 +65,7 @@ Verify: from `apps/backend`, `go test -race ./internal/features/canvas` (temp-fi
 | `Delete(ctx, thread, owner, paths)` | files or folders (prefix) soft-deleted as one op (`op_id`); one note: `deleted /hero/ (2 components: /hero/a.html, /hero/b.html); /cta/c.html` (≤ 5 files listed); unknown path → 404 |
 | `Restore(ctx, thread, owner, opID)` | un-deletes the op; 409 if a path is live again; removes the op's note while pending, else appends `restored …` |
 | `Move(ctx, thread, owner, from, to)` | file → file or folder → folder (rename = move); `to` normalized; 409 when a target file exists or a folder target exists; 400 for moving into itself / depth > 4; rewrites `path`, `source_path`s pointing at moved files and the layout keys (`c:`/`g:`/scale/dir) in one tx; note `moved /a.html → /cta/a.html` / `moved folder /a/ → /b/ (N components)` |
-| `State` / `PutLayout(ctx, thread, owner, layout)` | last write wins; keys must name paths of the thread (live or deleted; stale keys dropped), non-finite numbers dropped, scale clamped 0.25–4, dir ∈ row/col; > 256 KB or > 2000 entries per map → 400 |
+| `State` / `PutLayout(ctx, thread, owner, layout)` | last write wins; keys must name paths of the thread (live or deleted; stale keys dropped), non-finite numbers dropped, scale clamped 0.25–4, dir ∈ row/col/pack; > 256 KB or > 2000 entries per map → 400 |
 | `TakeNotes(ctx, thread)` | returns and clears pending notes (engine, inside the run-creation tx) |
 | `FS(thread) vfs.FS` | read-only adapter (below) |
 
@@ -104,7 +104,8 @@ Content keeps using `GET /artifacts/{id}/content` (engine, sandboxed CSP).
 - `html`: a fragment becomes a standalone page (`<!doctype html>`, charset, viewport, `<title>` =
   file name, fragment as the body — like the canvas frame, which uses it as the whole document);
   input already starting with `<!doctype`/`<html` passes through. Limit `MaxExportHTML` = 200 files.
-- `png` (`<stem>@2x.png`): rendered by `render.Renderer` with the export variant — width 1280 (the
+- `png` (`<stem>@2x.png`): rendered by `canvas.Screenshot(ctx, renderer, src, dpr)` (exported;
+  the engine's vision mode uses it at 1x) with the export variant — width 1280 (the
   canvas frame width), stage height 40, light, `#ffffff`, DPR 2, max height 4800. Content narrower
   than 75% of the stage (`Metrics.ContentX/ContentWidth`, the union of everything inside the stage)
   is cropped to it ± 48 px (min 320 px) and padded 48 px top/bottom in white; wide components keep
