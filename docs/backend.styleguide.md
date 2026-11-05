@@ -24,7 +24,7 @@ Verify: from `apps/backend`, `go test -race ./internal/features/styleguide
 | Route | Notes |
 |---|---|
 | `GET /styleguides` | `{items: [View]}` — the caller's own, newest first (≤ 200) |
-| `POST /styleguides` | **multipart/form-data**: `images` (1–4 files, ≤ 8 MB each, sniffed PNG/JPEG/WebP/GIF), `name?`, `notes?` → **201** View in `generating`. Body cap 4×8 MB + 1 MB (413). JSON would hit `httpx.Decode`'s 1 MB limit, hence multipart |
+| `POST /styleguides` | **multipart/form-data**: `images` (1–4 files, ≤ 8 MB each, sniffed PNG/JPEG/WebP/GIF), `name?`, `notes?` → **201** View in `generating`. Body cap 4×8 MB + 1 MB (413; the host nginx caps requests at 10 MB, so the frontend downscales samples first — `docs/frontend.studio-ui.md` "Style guides"). JSON would hit `httpx.Decode`'s 1 MB limit, hence multipart |
 | `GET /styleguides/{id}` | View; 404 for other users |
 | `PATCH /styleguides/{id}` | `{name?, markdown?}` (absent = keep; empty → 400). A markdown edit sets `ready` (hand-written guide works even after a failed generation). 409 while generating |
 | `DELETE /styleguides/{id}` | 204, soft delete. Threads that picked it keep following it (runtime lookups are `Unscoped`) |

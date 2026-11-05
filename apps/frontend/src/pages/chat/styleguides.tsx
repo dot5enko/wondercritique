@@ -21,6 +21,7 @@ import {
   updateStyleguide,
   type Styleguide,
 } from '../../api/styleguides'
+import { isImageFile, prepareSampleImage } from './sampleImage'
 
 /** How often the list refreshes while a guide is being generated. */
 const POLL_MS = 3000
@@ -169,7 +170,7 @@ export function CreateStyleguideModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [preparing, setPreparing] = useState(0)
 
   // revoke preview URLs when they leave the list / on unmount
   const urls = useRef<string[]>([])
@@ -187,23 +188,43 @@ export function CreateStyleguideModal({
     setError(null)
   }
   const close = (): void => {
-    if (busy) return
+    if (busy || preparing > 0) return
     reset()
     onClose()
   }
 
-  const add = (files: FileList | File[]): void => {
-    const list = [...files].filter((f) => f.type.startsWith('image/'))
-    const tooBig = list.filter((f) => f.size > MAX_STYLEGUIDE_IMAGE_BYTES)
-    const ok = list.filter((f) => f.size <= MAX_STYLEGUIDE_IMAGE_BYTES)
-    setPicked((prev) => {
-      const room = MAX_STYLEGUIDE_IMAGES - prev.length
-      if (ok.length > room) setError(`Up to ${MAX_STYLEGUIDE_IMAGES} images.`)
-      else if (tooBig.length > 0) setError(`${tooBig.map((f) => f.name).join(', ')}: larger than 8 MB.`)
-      else if (list.length === 0 && files.length > 0) setError('Only images (PNG, JPEG, WebP, GIF).')
-      else setError(null)
-      return [...prev, ...ok.slice(0, Math.max(0, room)).map((file) => ({ file, url: URL.createObjectURL(file) }))]
+  // `files` must be copied before the input is reset (Chrome empties the live FileList)
+  const add = async (files: File[]): Promise<void> => {
+    const images = files.filter(isImageFile)
+    const room = MAX_STYLEGUIDE_IMAGES - picked.length - preparing
+    const take = images.slice(0, Math.max(0, room))
+    if (take.length === 0) {
+      if (images.length > 0) setError(`Up to ${MAX_STYLEGUIDE_IMAGES} images.`)
+      else if (files.length > 0) setError('Only images (PNG, JPEG, WebP, GIF).')
+      return
+    }
+    setPreparing((n) => n + take.length)
+    // big photos / screenshots / HEIC are downscaled to JPEG on the device (sampleImage.ts)
+    const results = await Promise.allSettled(take.map(prepareSampleImage))
+    setPreparing((n) => n - take.length)
+    const ok: File[] = []
+    const failed: string[] = []
+    const tooBig: string[] = []
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') failed.push(take[i].name)
+      else if (r.value.size > MAX_STYLEGUIDE_IMAGE_BYTES) tooBig.push(take[i].name)
+      else ok.push(r.value)
     })
+    if (images.length > take.length) setError(`Up to ${MAX_STYLEGUIDE_IMAGES} images.`)
+    else if (failed.length > 0) setError(`${failed.join(', ')}: couldn't read the image.`)
+    else if (tooBig.length > 0) setError(`${tooBig.join(', ')}: larger than 8 MB.`)
+    else if (images.length < files.length) setError('Only images (PNG, JPEG, WebP, GIF).')
+    else setError(null)
+    if (ok.length === 0) return
+    setPicked((prev) => [
+      ...prev,
+      ...ok.slice(0, MAX_STYLEGUIDE_IMAGES - prev.length).map((file) => ({ file, url: URL.createObjectURL(file) })),
+    ])
   }
 
   const submit = async (): Promise<void> => {
@@ -237,7 +258,7 @@ export function CreateStyleguideModal({
           <Button variant="secondary" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={() => void submit()} loading={busy} disabled={picked.length === 0}>
+          <Button variant="primary" onClick={() => void submit()} loading={busy} disabled={picked.length === 0 || preparing > 0}>
             Generate
           </Button>
         </>
@@ -253,7 +274,7 @@ export function CreateStyleguideModal({
           onDrop={(e) => {
             e.preventDefault()
             setDragging(false)
-            add(e.dataTransfer.files)
+            void add([...e.dataTransfer.files])
           }}
           className={cx(
             'flex flex-wrap gap-2 rounded-xl border border-dashed p-2 transition-colors',
@@ -273,30 +294,35 @@ export function CreateStyleguideModal({
               </button>
             </div>
           ))}
-          {picked.length < MAX_STYLEGUIDE_IMAGES && (
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
+          {Array.from({ length: preparing }, (_, i) => (
+            <div key={`prep-${i}`} className="grid size-24 place-items-center rounded-lg border border-line bg-surface">
+              <Spinner size={16} />
+            </div>
+          ))}
+          {picked.length + preparing < MAX_STYLEGUIDE_IMAGES && (
+            /* A <label> around a visually hidden input: a programmatic .click() on a
+             * display:none input doesn't open the picker on some tablet browsers. */
+            <label
               className={cx(
-                'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg text-xs text-ink-2 outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/40',
-                picked.length === 0 ? 'h-32 w-full' : 'size-24 border border-line bg-surface',
+                'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg text-xs text-ink-2 outline-none hover:text-ink has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent/40',
+                picked.length + preparing === 0 ? 'h-32 w-full' : 'size-24 border border-line bg-surface',
               )}
             >
-              <ImagePlus size={picked.length === 0 ? 22 : 18} />
-              {picked.length === 0 ? `Drop or choose up to ${MAX_STYLEGUIDE_IMAGES} images` : 'Add'}
-            </button>
+              <ImagePlus size={picked.length + preparing === 0 ? 22 : 18} />
+              {picked.length + preparing === 0 ? `Drop or choose up to ${MAX_STYLEGUIDE_IMAGES} images` : 'Add'}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  const files = [...(e.target.files ?? [])]
+                  e.target.value = ''
+                  void add(files)
+                }}
+              />
+            </label>
           )}
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            multiple
-            hidden
-            onChange={(e) => {
-              if (e.target.files) add(e.target.files)
-              e.target.value = ''
-            }}
-          />
         </div>
         <Field label="Name" optional hint="Leave empty and the model names it.">
           <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="e.g. Acme marketing" />

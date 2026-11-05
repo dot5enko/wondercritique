@@ -151,7 +151,13 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   `docs/backend.styleguide.md`): `useStyleguides()` lists `GET /styleguides` and re-polls every 3 s
   while any guide is `generating` (`upsert`/`remove` for optimistic updates). `StyleguidePills`
   (horizontal scroll row): dashed "+ Style guide" → `CreateStyleguideModal` (drop / choose ≤ 4
-  images ≤ 8 MB with thumbnails, optional name + notes → multipart `createStyleguide` via
+  images with thumbnails; the picker is a `<label>` around an `sr-only` `accept="image/*"` input —
+  a `.click()` on a `hidden` input didn't open it on tablets; picked files are copied before the
+  input reset, `isImageFile` also takes empty-`type` files by extension (mobile pickers), and
+  `pages/chat/sampleImage.ts` `prepareSampleImage` (2026-11-05) re-encodes anything that isn't a
+  ≤ 1.5 MB PNG/JPEG/WebP (or any GIF) — HEIC, big photos / screenshots — to a JPEG ≤ 2048 px long
+  edge on the device (spinner tiles while preparing; Generate / close wait), keeping the request
+  under the host nginx's 10 MB `client_max_body_size`; optional name + notes → multipart `createStyleguide` via
   `apiPost(FormData)` — `api/client.ts` `send` passes FormData through without a JSON
   Content-Type); one pill per guide: tap a ready one → `/chat/new?styleguide=<id>`; a generating one
   shows a spinner ("Generating…" until named), a failed one is red; the "…" (and taps on non-ready
