@@ -152,7 +152,8 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   while any guide is `generating` (`upsert`/`remove` for optimistic updates). `StyleguidePills`
   (horizontal scroll row): dashed "+ Style guide" → `CreateStyleguideModal` (drop / choose ≤ 4
   images with thumbnails; the picker is a `<label>` around an `sr-only` `accept="image/*"` input —
-  a `.click()` on a `hidden` input didn't open it on tablets; picked files are copied before the
+  a `.click()` on a `hidden` input didn't open it on tablets; on `pointer-coarse` devices the empty
+  state swaps the "Drop or choose…" text for a button-styled "Choose images" span inside the label; picked files are copied before the
   input reset, `isImageFile` also takes empty-`type` files by extension (mobile pickers), and
   `pages/chat/sampleImage.ts` `prepareSampleImage` (2026-11-05) re-encodes anything that isn't a
   ≤ 1.5 MB PNG/JPEG/WebP (or any GIF) — HEIC, big photos / screenshots — to a JPEG ≤ 2048 px long

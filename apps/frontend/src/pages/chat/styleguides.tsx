@@ -309,7 +309,20 @@ export function CreateStyleguideModal({
               )}
             >
               <ImagePlus size={picked.length + preparing === 0 ? 22 : 18} />
-              {picked.length + preparing === 0 ? `Drop or choose up to ${MAX_STYLEGUIDE_IMAGES} images` : 'Add'}
+              {picked.length + preparing === 0 ? (
+                <>
+                  <span className="pointer-coarse:hidden">Drop or choose up to {MAX_STYLEGUIDE_IMAGES} images</span>
+                  {/* touch devices can't drop files: show a real button-looking target instead */}
+                  <span className="hidden flex-col items-center gap-1.5 pointer-coarse:flex">
+                    <span className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-white">
+                      Choose images
+                    </span>
+                    Up to {MAX_STYLEGUIDE_IMAGES} from your photos or files
+                  </span>
+                </>
+              ) : (
+                'Add'
+              )}
               <input
                 type="file"
                 accept="image/*"
