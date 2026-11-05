@@ -64,12 +64,26 @@ func NewController(service *Service, mw *auth.Middleware) *Controller {
 
 // Routes registers the settings routes on r (mounted at /api/v1).
 func (c *Controller) Routes(r chi.Router) {
-	r.Route("/settings/providers", func(r chi.Router) {
+	r.Route("/settings", func(r chi.Router) {
 		r.Use(c.mw.Required, auth.Role("admin"))
-		r.Get("/", httpx.Handle(c.list))
-		r.Put("/{providerID}", httpx.Handle(c.update))
-		r.Post("/{providerID}/test", httpx.Handle(c.test))
-		r.Post("/catalog/refresh", httpx.Handle(c.refresh))
+		r.Get("/setup/status", httpx.Handle(c.setupStatus))
+		r.Route("/providers", func(r chi.Router) {
+			r.Get("/", httpx.Handle(c.list))
+			r.Put("/{providerID}", httpx.Handle(c.update))
+			r.Post("/{providerID}/test", httpx.Handle(c.test))
+			r.Post("/catalog/refresh", httpx.Handle(c.refresh))
+		})
+	})
+}
+
+// SetupStatus is the first-run wizard probe: {needs_setup} is true when no
+// allowed provider is enabled with a key.
+func (c *Controller) setupStatus(w http.ResponseWriter, r *http.Request) error {
+	needs, enabled, ready := c.service.SetupStatus(r.Context())
+	return httpx.JSON(w, http.StatusOK, map[string]any{
+		"needs_setup":   needs,
+		"enabled_count": enabled,
+		"ready_count":   ready,
 	})
 }
 

@@ -1,0 +1,46 @@
+# Wonder Critique — whole stack in one place.
+#   cp .env.example .env   # optional, sensible defaults otherwise
+#   docker compose up -d --build
+#   open http://localhost:8080
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      JWT_SECRET: ${JWT_SECRET:-}
+      SECRETS_KEY: ${SECRETS_KEY:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      # LLM keys are optional here — they can also be added in the UI (Settings → Providers)
+      META_MODEL_API_KEY: ${META_MODEL_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ENGINE_CONCURRENCY: ${ENGINE_CONCURRENCY:-4}
+      RENDER_CONCURRENCY: ${RENDER_CONCURRENCY:-2}
+      RENDER_CHROME_NO_SANDBOX: ${RENDER_CHROME_NO_SANDBOX:-false}
+    # Chromium keeps its own sandbox (user namespaces), which Docker's default
+    # seccomp/AppArmor profiles block. Lifting them for this container is
+    # preferred over running Chrome with --no-sandbox.
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    volumes:
+      - data:/data
+
+  frontend:
+    build:
+      context: apps/frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${PORT:-8080}:80"
+
+volumes:
+  data:

@@ -71,7 +71,7 @@ export default function SettingsPage() {
     <div className="flex h-full flex-col p-6">
       <PageHeader
         title="LLM providers"
-        description="Enable providers, store API keys and set rate limits — sourced from the models.dev catalog."
+        description="Only OpenRouter and Meta are available, with Meta-family models — enable one, store its API key and set a rate limit."
       />
 
       <Loadable loading={loading && data === null} error={error} onRetry={reload} className="mt-4 min-h-0 flex-1">

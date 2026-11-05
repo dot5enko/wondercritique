@@ -3,6 +3,7 @@
  *
  * Route table:
  *   /login                          public — email-code login, no shell
+ *   /setup                          admin-only first-run wizard (provider + Meta model), no shell
  *   /showcase                       dev-only design-system showcase (no shell)
  *   /chat                           chat list + "New chat" (full screen, no shell); ?thread=x → /chat/x
  *   /chat/:threadId, /chat/new      full-screen design canvas of one chat (no shell)
@@ -17,9 +18,11 @@ import { Suspense, lazy } from 'react'
 import { Outlet, createBrowserRouter, redirect, RouterProvider } from 'react-router'
 import { AuthProvider, BootScreen, RequireAdmin, RequireAuth } from './features/auth'
 import Shell from './pages/shell'
+import { SetupGate } from './pages/setup/gate'
 import { ThreadsProvider } from './pages/chat/threads'
 
 const LoginPage = lazy(() => import('./pages/login'))
+const SetupPage = lazy(() => import('./pages/setup'))
 const ShowcasePage = lazy(() => import('./pages/showcase'))
 const RunDetailPage = lazy(() => import('./pages/runs/detail'))
 const ChatListPage = lazy(() => import('./pages/chat'))
@@ -36,6 +39,7 @@ const router = createBrowserRouter([
     // Pathless root layout: auth state + the shared Suspense boundary.
     element: (
       <AuthProvider>
+        <SetupGate />
         <Suspense fallback={<BootScreen />}>
           <Outlet />
         </Suspense>
@@ -44,6 +48,15 @@ const router = createBrowserRouter([
     children: [
       { path: '/login', element: <LoginPage /> },
       ...(import.meta.env.DEV ? [{ path: '/showcase', element: <ShowcasePage /> }] : []),
+      {
+        // First-run setup wizard (admin only): no shell, like the chat routes.
+        element: (
+          <RequireAdmin>
+            <Outlet />
+          </RequireAdmin>
+        ),
+        children: [{ path: '/setup', element: <SetupPage /> }],
+      },
       {
         // Chats are full screen: no shell, no sidebar.
         element: (

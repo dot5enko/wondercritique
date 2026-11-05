@@ -89,6 +89,32 @@ var chatProviderIDs = map[string]bool{
 	"togetherai": true, "cerebras": true, "mistral": true, "perplexity": true,
 }
 
+// AllowedProviders is the setup-wizard allowlist (2026-11-05): only
+// OpenRouter and the Meta API can be enabled. Everything else is dropped
+// from the in-memory registry at reparse time, so Catalog, Snapshot,
+// EnabledModels and Provider construction all see just these two.
+var AllowedProviders = map[string]bool{
+	"openrouter": true,
+	"meta":       true,
+}
+
+// IsAllowedProvider reports whether a provider id is configurable.
+func IsAllowedProvider(id string) bool { return AllowedProviders[id] }
+
+// IsAllowedModel reports whether a model may be offered for a provider.
+// The wizard is limited to the Meta family ("meta/*"): the meta provider
+// keeps all its models (they are all Meta models: muse-spark-…, muse-wonder),
+// while openrouter keeps only Meta-family ids (muse / meta / llama).
+func IsAllowedModel(providerID, modelID string) bool {
+	if providerID == "meta" {
+		return true
+	}
+	lower := strings.ToLower(modelID)
+	return strings.Contains(lower, "muse") ||
+		strings.Contains(lower, "meta") ||
+		strings.Contains(lower, "llama")
+}
+
 // ResolveAdapter maps models.dev npm/shape metadata to an agentkit adapter family.
 func ResolveAdapter(npm, shape, providerID string) string {
 	switch shape {

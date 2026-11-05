@@ -69,7 +69,13 @@ func fakeCatalog(etag string) http.HandlerFunc {
 	             "muse-dep": {"id":"muse-dep","name":"Muse Dep","status":"deprecated"},
 	             "muse-embed": {"id":"muse-embed","name":"Muse Embed","type":"embedding"}
 	           }},
-	  "compat": {"id":"compat","name":"Compat","env":["COMPAT_KEY"],"npm":"@ai-sdk/openai-compatible",
+	  "openrouter": {"id":"openrouter","name":"OpenRouter","env":["OPENROUTER_API_KEY"],"npm":"@ai-sdk/openai-compatible",
+             "api":"https://openrouter.ai/api/v1","doc":"https://openrouter.ai",
+             "models":{
+               "meta-llama/llama-3.1-8b": {"id":"meta-llama/llama-3.1-8b","name":"Llama 3.1 8B","tool_call":true},
+               "openai/gpt-4o": {"id":"openai/gpt-4o","name":"GPT-4o","tool_call":true}
+             }},
+  "compat": {"id":"compat","name":"Compat","env":["COMPAT_KEY"],"npm":"@ai-sdk/openai-compatible",
 	             "api":"https://${REGION}.compat.example/v1",
 	             "models":{"c-1":{"id":"c-1","name":"C1"}}},
 	  "anthropic": {"id":"anthropic","name":"Anthropic","env":["ANTHROPIC_API_KEY"],"npm":"@ai-sdk/anthropic",
@@ -98,7 +104,7 @@ func TestParseCatalogAndResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	provs, syncedAt := s.Catalog()
-	if len(provs) != 5 {
+	if len(provs) != 2 { // allowlist: only meta + openrouter survive reparse
 		t.Fatalf("providers = %d", len(provs))
 	}
 	if syncedAt.IsZero() {
@@ -110,6 +116,19 @@ func TestParseCatalogAndResolve(t *testing.T) {
 	}
 	if byID["meta"].Adapter != AdapterResponses {
 		t.Errorf("meta adapter = %q", byID["meta"].Adapter)
+	}
+	if byID["openrouter"].Adapter != AdapterChat {
+		t.Errorf("openrouter adapter = %q", byID["openrouter"].Adapter)
+	}
+	// openrouter keeps only Meta-family models (openai/gpt-4o is dropped).
+	if got := len(byID["openrouter"].Models); got != 1 || byID["openrouter"].Models[0].ID != "meta-llama/llama-3.1-8b" {
+		t.Errorf("openrouter models = %+v", byID["openrouter"].Models)
+	}
+	// Disallowed providers are dropped by the allowlist.
+	for _, dropped := range []string{"compat", "anthropic", "weird", "shaped"} {
+		if _, ok := byID[dropped]; ok {
+			t.Errorf("provider %q should be filtered by the allowlist", dropped)
+		}
 	}
 	if len(byID["meta"].Models) != 2 { // embedding dropped
 		t.Fatalf("meta models = %d", len(byID["meta"].Models))
@@ -124,21 +143,8 @@ func TestParseCatalogAndResolve(t *testing.T) {
 	if !byID["meta"].Models[1].Deprecated {
 		t.Error("muse-dep should be deprecated")
 	}
-	if byID["compat"].Adapter != AdapterChat {
-		t.Errorf("compat adapter = %q", byID["compat"].Adapter)
-	}
-	if byID["anthropic"].Adapter != AdapterAnthropic {
-		t.Errorf("anthropic adapter = %q", byID["anthropic"].Adapter)
-	}
-	if byID["weird"].Adapter != AdapterNone {
-		t.Errorf("weird adapter = %q", byID["weird"].Adapter)
-	}
-	// shaped: s-resp differs from the provider adapter and is dropped; s-chat kept.
-	if got := len(byID["shaped"].Models); got != 1 || byID["shaped"].Models[0].ID != "s-chat" {
-		t.Errorf("shaped models = %+v", byID["shaped"].Models)
-	}
-	// Snapshot order preserved.
-	if provs[0].ID != "meta" || provs[1].ID != "compat" {
+	// Snapshot order preserved (allowlist order follows the snapshot).
+	if provs[0].ID != "meta" || provs[1].ID != "openrouter" {
 		t.Errorf("order = %v", []string{provs[0].ID, provs[1].ID})
 	}
 }
@@ -271,13 +277,15 @@ func TestProviderStateCRUDAndGuards(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Unknown provider → 404-shaped error.
-	if _, err := s.UpdateProvider(ctx, "nope", updateProviderBody{Enabled: true, BaseURLVars: map[string]string{}}); !apperrIsNotFound(err) {
+	// Providers outside the allowlist (unknown or disabled by scope) → 400.
+	if _, err := s.UpdateProvider(ctx, "nope", updateProviderBody{Enabled: true, BaseURLVars: map[string]string{}}); !apperrIsInvalid(err) {
 		t.Fatalf("err = %v", err)
 	}
-	// none adapter → 400.
-	if _, err := s.UpdateProvider(ctx, "weird", updateProviderBody{Enabled: true, BaseURLVars: map[string]string{}}); !apperrIsInvalid(err) {
-		t.Fatalf("err = %v", err)
+	// Providers outside the allowlist (compat, weird, …) → 400.
+	for _, dropped := range []string{"compat", "weird", "anthropic", "shaped"} {
+		if _, err := s.UpdateProvider(ctx, dropped, updateProviderBody{Enabled: true, BaseURLVars: map[string]string{}}); !apperrIsInvalid(err) {
+			t.Fatalf("%s err = %v", dropped, err)
+		}
 	}
 	// Negative rpm → 400.
 	if _, err := s.UpdateProvider(ctx, "meta", updateProviderBody{Enabled: true, BaseURLVars: map[string]string{}, RPMLimit: intPtr(-1)}); !apperrIsInvalid(err) {
@@ -305,14 +313,14 @@ func TestProviderStateCRUDAndGuards(t *testing.T) {
 	}
 
 	// Disabled provider → unavailable.
-	if _, err := s.Provider(ctx, "compat"); !apperrIsUnavailable(err) {
+	if _, err := s.Provider(ctx, "openrouter"); !apperrIsUnavailable(err) {
 		t.Errorf("err = %v", err)
 	}
 	// Enabled but keyless → unavailable.
-	if _, err := s.UpdateProvider(ctx, "compat", updateProviderBody{Enabled: true, BaseURLVars: map[string]string{}}); err != nil {
+	if _, err := s.UpdateProvider(ctx, "openrouter", updateProviderBody{Enabled: true, BaseURLVars: map[string]string{}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Provider(ctx, "compat"); !apperrIsUnavailable(err) {
+	if _, err := s.Provider(ctx, "openrouter"); !apperrIsUnavailable(err) {
 		t.Errorf("err = %v", err)
 	}
 
@@ -321,21 +329,67 @@ func TestProviderStateCRUDAndGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Catalog) != 5 || len(snap.State) != 5 {
+	if len(snap.Catalog) != 2 || len(snap.State) != 2 {
 		t.Fatalf("snapshot catalog=%d state=%d", len(snap.Catalog), len(snap.State))
 	}
 	if snap.SyncedAt == nil || *snap.SyncedAt == "" {
 		t.Error("synced_at missing")
 	}
 	models := s.EnabledModels()
-	if len(models) != 3 { // meta 2 + compat 1 (weird disabled, anthropic disabled)
+	if len(models) != 3 { // meta 2 + openrouter 1 (non-Meta openrouter model dropped)
 		t.Fatalf("enabled models = %+v", models)
 	}
 	if models[0].ProviderID != "meta" || models[0].ModelID != "muse-1" || !models[0].Vision {
 		t.Errorf("model 0 = %+v", models[0])
 	}
-	if models[2].ProviderID != "compat" {
+	if models[2].ProviderID != "openrouter" || models[2].ModelID != "meta-llama/llama-3.1-8b" {
 		t.Errorf("model 2 = %+v", models[2])
+	}
+
+	// SetupStatus: meta is enabled with a key → no setup needed.
+	if needs, enabled, ready := s.SetupStatus(ctx); needs || enabled != 2 || ready != 1 {
+		t.Errorf("setup status = needs=%v enabled=%d ready=%d", needs, enabled, ready)
+	}
+}
+
+// TestSetupStatusNeedsSetup reports setup needed when nothing is ready.
+func TestSetupStatusNeedsSetup(t *testing.T) {
+	s, _ := newTestService(t, fakeCatalog(`"e1"`))
+	if err := s.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if needs, _, _ := s.SetupStatus(ctx); !needs {
+		t.Error("fresh install should need setup")
+	}
+	// Enabled but keyless still needs setup.
+	if _, err := s.UpdateProvider(ctx, "meta", updateProviderBody{Enabled: true, BaseURLVars: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if needs, enabled, ready := s.SetupStatus(ctx); !needs || enabled != 1 || ready != 0 {
+		t.Errorf("keyless setup status = needs=%v enabled=%d ready=%d", needs, enabled, ready)
+	}
+}
+
+// TestIsAllowedModel keeps the wizard to the Meta family.
+func TestIsAllowedModel(t *testing.T) {
+	for _, id := range []string{"muse-spark-1.3-contributor", "muse-wonder-1.0", "anything"} {
+		if !IsAllowedModel("meta", id) {
+			t.Errorf("meta should allow %q", id)
+		}
+	}
+	for _, id := range []string{"meta-llama/llama-3.1-8b", "muse-spark-1.3", "meta-movie-gen"} {
+		if !IsAllowedModel("openrouter", id) {
+			t.Errorf("openrouter should allow %q", id)
+		}
+	}
+	for _, id := range []string{"openai/gpt-4o", "anthropic/claude-3"} {
+		if IsAllowedModel("openrouter", id) {
+			t.Errorf("openrouter should reject %q", id)
+		}
+	}
+	if IsAllowedProvider("anthropic") || !IsAllowedProvider("meta") || !IsAllowedProvider("openrouter") {
+		t.Error("allowlist should be exactly openrouter + meta")
 	}
 }
 

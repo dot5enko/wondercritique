@@ -1,6 +1,6 @@
 # Frontend
 
-State as of 2026-11-04 (canvas UI: full-screen chat list + full-screen pan/zoom design canvas per
+State as of 2026-11-05 (setup wizard `/setup` + `SetupGate` first-run redirect; canvas UI: full-screen chat list + full-screen pan/zoom design canvas per
 chat, no sidebar on chat routes). Base stack unchanged.
 
 ## Location & stack
@@ -33,6 +33,7 @@ chat, no sidebar on chat routes). Base stack unchanged.
 | Route | Guard | Page |
 |---|---|---|
 | `/login` | public | email-code login (start → verify, resend countdown from 60 s / `Retry-After`) |
+| `/setup` | admin, no shell | first-run wizard (2026-11-05): provider (openrouter/meta) + API key + test, Meta-family model → published `default` model set, done; `SetupGate` (in `AuthProvider`) redirects admins with `needs_setup` here; re-runnable, shows "already set up" when a ready provider exists |
 | `/` | auth | redirect → `/chat` |
 | `/chat` | auth, **no shell** | chat list + "New chat" (`pages/chat/index.tsx`); legacy `?thread=x` redirects (loader) to `/chat/x` |
 | `/chat/:threadId` | auth, **no shell** | full-screen design canvas of one chat (`pages/chat/canvas/`, see `docs/frontend.studio-ui.md`); `threadId = new` is a new chat (a param value, not its own route, so the canvas stays mounted when the first message turns it into `/chat/<thread>`) |
@@ -91,7 +92,9 @@ is the backend reference. Reconciled and verified by `npm run typecheck`:
   `studio.ts` are resolved in the implemented shapes (draft/versions shapes match; `next_cursor`
   is always `null` for now — list offset/limit supported).
 - `settings.ts` — `GET/PUT /settings/providers/{id}`, `/test`, `/catalog/refresh` implemented
-  (`synced_at`, `model_count`, `has_key` only, `rpm_limit: null` = unlimited).
+  (`synced_at`, `model_count`, `has_key` only, `rpm_limit: null` = unlimited);
+  `GET /settings/setup/status` → `{needs_setup, enabled_count, ready_count}` (2026-11-05).
+  The providers page notes the openrouter+meta / Meta-models limit.
 - `agents.ts` — the generic chat mount `/agents/{slug}/…` serves every published agent
   (agentkit httpapi surface, unchanged).
 - `runs.ts` — **implemented by the engine (2026-11-02, plan phase 6; `docs/backend.engine.md`)**:

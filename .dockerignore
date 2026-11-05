@@ -1,0 +1,12 @@
+.git
+tmp
+deploy
+docs
+apps/frontend
+apps/backend/bin
+apps/backend/main
+apps/backend/data
+**/.env
+**/*.db
+**/*.db-shm
+**/*.db-wal

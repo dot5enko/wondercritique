@@ -137,6 +137,14 @@ already-seeded install (`ensureJudge`, `ensureChatAgent`) — 6 seeded agents.
   base_url_vars, rpm_limit?}` (unknown → 404, none adapter → 400, negative rpm → 400; omit/empty
   api_key keeps the stored one) → updated state; `POST /{id}/test` → `{ok, detail?}` (1-token
   request against the provider's first model; 30s timeout); `POST /catalog/refresh`.
+ - **Allowlist (2026-11-05, setup-wizard scope): only `openrouter` + `meta`** (`llm.AllowedProviders`,
+   enforced in `reparse`: other snapshot providers are dropped, so Catalog/Snapshot/EnabledModels/
+   Provider construction only ever see these two). **Models limited to the Meta family**
+   (`llm.IsAllowedModel`): `meta` keeps all its models (all Meta: muse-spark-…, muse-wonder);
+   `openrouter` keeps only ids containing muse/meta/llama.
+ - `GET /settings/setup/status` (admin, 2026-11-05): `{needs_setup, enabled_count, ready_count}` —
+   `needs_setup` is true when no allowed provider is enabled with a key. The frontend wizard
+   (`/setup`) redirects to `/chat` once false; `SetupGate` sends admins with `needs_setup` to `/setup`.
 - `Service`: `SyncedAt()`, `Refresh(ctx)`, `Catalog()/CatalogEntry()`, `EnabledModels() []ModelInfo`
   (enabled providers only), `Provider(ctx, providerID) (llm.Provider, error)` (NotFound/Unavailable
   on unknown, none-adapter, disabled, keyless, missing base-url var; wrapped with the per-provider

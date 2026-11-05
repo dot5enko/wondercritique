@@ -9,6 +9,8 @@ apps/
   backend/     Go API server (see docs/backend*.md; pipeline engine: docs/backend.engine.md)
   frontend/    Vite + TS + React SPA (see docs/frontend.md)
 deploy/ansible/  Ansible: backend + frontend + nginx roles (see docs/deploy.ansible.md)
+docker-compose.yml  Full stack in Docker, root .env.example (see docs/deploy.docker.md, 2026-11-05)
+README.md      Product summary + how to run (local / compose)
 go.work        Go workspace: apps/backend + apps/backend/agentkit
 localrun.sh    Run backend + frontend dev servers together (see below)
 ```

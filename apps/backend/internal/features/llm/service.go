@@ -136,6 +136,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 }
 
 // reparse rebuilds the in-memory registry from a snapshot body.
+// Providers outside AllowedProviders and models outside the Meta family
+// (IsAllowedModel) are dropped, so only openrouter + meta with Meta models
+// are ever offered (setup wizard scope, 2026-11-05).
 func (s *Service) reparse(fetchedAt time.Time, body string) error {
 	providers, err := parseCatalog([]byte(body))
 	if err != nil {
@@ -146,6 +149,16 @@ func (s *Service) reparse(fetchedAt time.Time, body string) error {
 	s.providers = make(map[string]*CatalogProvider, len(providers))
 	s.order = s.order[:0]
 	for _, p := range providers {
+		if !IsAllowedProvider(p.ID) {
+			continue
+		}
+		kept := p.Models[:0]
+		for _, m := range p.Models {
+			if IsAllowedModel(p.ID, m.ID) {
+				kept = append(kept, m)
+			}
+		}
+		p.Models = kept
 		s.providers[p.ID] = p
 		s.order = append(s.order, p.ID)
 	}
@@ -307,6 +320,7 @@ func (s *Service) SetKey(ctx context.Context, providerID, plaintext string) erro
 
 // Snapshot builds the GET /settings/providers payload: catalog (snapshot
 // order) joined with state rows. Keys are never returned — has_key only.
+// Only AllowedProviders are listed (setup wizard scope, 2026-11-05).
 func (s *Service) Snapshot(ctx context.Context) (ProvidersResponse, error) {
 	provs, syncedAt := s.Catalog()
 	catalog := make([]ProviderCatalogEntry, 0, len(provs))
@@ -362,9 +376,31 @@ func (s *Service) stateDTO(p *CatalogProvider, row *models.LLMProvider) Provider
 	return st
 }
 
+// SetupStatus reports whether first-run setup is still needed: true when no
+// allowed provider is both enabled and has a key (stored or env fallback).
+// The wizard (GET /settings/setup/status) redirects to /chat once false.
+func (s *Service) SetupStatus(ctx context.Context) (needsSetup bool, enabledCount, readyCount int) {
+	provs, _ := s.Catalog()
+	for _, p := range provs {
+		row, err := s.stateRow(ctx, p.ID)
+		if err != nil || row == nil || !row.Enabled {
+			continue
+		}
+		enabledCount++
+		if s.hasKey(ctx, p, row) {
+			readyCount++
+		}
+	}
+	return readyCount == 0, enabledCount, readyCount
+}
+
 // UpdateProvider applies a PUT /settings/providers/{id} body and answers with
-// the updated state. Unknown provider → 404; none adapter → 400.
+// the updated state. Unknown provider → 404; none adapter → 400; providers
+// outside the setup-wizard allowlist (only openrouter + meta) → 400.
 func (s *Service) UpdateProvider(ctx context.Context, providerID string, body updateProviderBody) (ProviderState, error) {
+	if !IsAllowedProvider(providerID) {
+		return ProviderState{}, apperr.Invalid("provider "+providerID+" is not available (only openrouter and meta can be enabled)", nil)
+	}
 	p, ok := s.CatalogEntry(providerID)
 	if !ok {
 		return ProviderState{}, apperr.NotFound("unknown provider " + providerID)

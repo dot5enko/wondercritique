@@ -55,6 +55,17 @@ export function getProviders(signal?: AbortSignal): Promise<ProvidersResponse> {
 /** Catalog entry joined with its state row, ordered as the catalog lists them. */
 export interface ProviderWithState extends ProviderCatalogEntry, Omit<ProviderState, 'provider_id'> {}
 
+/** First-run wizard probe (`GET /settings/setup/status`, admin only). */
+export interface SetupStatus {
+  needs_setup: boolean
+  enabled_count: number
+  ready_count: number
+}
+
+export function getSetupStatus(signal?: AbortSignal): Promise<SetupStatus> {
+  return apiGet<SetupStatus>('/settings/setup/status', { signal })
+}
+
 /** Joins the models.dev catalog with the enabled/state rows into one list. */
 export function mergeProviders(catalog: ProviderCatalogEntry[], state: ProviderState[]): ProviderWithState[] {
   const byId = new Map(state.map((s) => [s.provider_id, s]))
