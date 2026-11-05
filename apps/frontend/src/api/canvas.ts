@@ -33,12 +33,12 @@ export interface CanvasPoint {
 /**
  * View layout, keyed by paths: `pos` = `g:<folder>` (top-level groups:
  * absolute canvas position; nested groups: offset) | `c:<file>` (offset),
- * `scale` = file → uniform scale, `dir` = folder → row / col flow.
+ * `scale` = file → uniform scale, `dir` = folder → row / col / pack flow.
  */
 export interface CanvasLayout {
   pos: Record<string, CanvasPoint>
   scale: Record<string, number>
-  dir: Record<string, 'row' | 'col'>
+  dir: Record<string, 'row' | 'col' | 'pack'>
 }
 
 /** A user operation the next run will be told about. */

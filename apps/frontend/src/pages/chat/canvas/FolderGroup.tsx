@@ -6,7 +6,7 @@
  * (`g:<folder>`) — selecting it means "every file below it".
  *
  * Layout: the folder's items flow in a wrapping row (or a single row / column,
- * see `dir`); moved items are translated by their offset and the block grows
+ * or packed into several columns — see `dir`); moved items are translated by their offset and the block grows
  * around them: right / bottom by padding (pushes what follows in the stack),
  * left / top by extending its background (the layout never shifts). A
  * top-level block can be moved on the canvas by its top-edge handle (then it's
@@ -16,20 +16,53 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import { Ban, RotateCw } from 'lucide-react'
 import { Button, cx } from '../../../ui'
 import { Markdown } from '../../../components'
-import { baseOf, type CanvasFile } from '../../../api/canvas'
+import { type CanvasFile } from '../../../api/canvas'
 import { cancelRun, isTerminalRunStatus, type Run, type RunStatus } from '../../../api/runs'
 import { usePipelineBody } from '../../runs/usePipelineBody'
 import { nodeLabel } from '../../runs/shared'
 import { RunProgress } from '../RunProgress'
 import { ComponentFrame, FRAME_WIDTH, FrameHandles } from './ComponentFrame'
 import { componentsOf, useRunLive } from './useRunLive'
-import { folderLabel, type FolderNode } from './tree'
-import type { CanvasLayout, GroupDir } from './layout'
+import { componentLabel, folderLabel, type FolderNode } from './tree'
+import { PACK_GAP, packAspect, packRects, type CanvasLayout, type GroupDir } from './layout'
 
 const ITEMS_LAYOUT: Record<GroupDir | 'wrap', string> = {
   wrap: 'max-w-[5400px] flex-wrap',
   row: 'flex-nowrap',
   col: 'flex-col',
+  // items placed absolutely by the layout effect (packRects)
+  pack: '',
+}
+
+/** Places a packed folder's items; returns the packed block's size. */
+function packItems(kids: HTMLElement[]): { w: number; h: number } {
+  for (const el of kids) el.style.width = 'max-content'
+  const mt = kids.map((el) => parseFloat(getComputedStyle(el).marginTop || '0'))
+  const at = packRects(kids.map((el, i) => ({ w: el.offsetWidth, h: el.offsetHeight + mt[i] })), PACK_GAP, packAspect())
+  let w = 0
+  let h = 0
+  kids.forEach((el, i) => {
+    el.style.position = 'absolute'
+    el.style.left = `${at[i].x}px`
+    el.style.top = `${at[i].y}px`
+    w = Math.max(w, at[i].x + el.offsetWidth)
+    h = Math.max(h, at[i].y + mt[i] + el.offsetHeight)
+  })
+  return { w, h }
+}
+
+/** Back to the flex flow after `pack`. */
+function unpackItems(box: HTMLElement): void {
+  if (!box.dataset.packed) return
+  delete box.dataset.packed
+  box.style.width = ''
+  box.style.height = ''
+  for (const el of Array.from(box.children) as HTMLElement[]) {
+    el.style.position = ''
+    el.style.left = ''
+    el.style.top = ''
+    el.style.width = ''
+  }
 }
 
 /**
@@ -66,7 +99,6 @@ export const FolderGroup = memo(function FolderGroup({
   const selected = selection.has(key)
   const offset = layout.pos[key]
   const dir = layout.dir[node.path]
-  const origin = node.firstRun ? env.messageOf(node.firstRun) : null
 
   // Grow the block around moved items (translate doesn't affect layout).
   const boxRef = useRef<HTMLDivElement>(null)
@@ -80,11 +112,20 @@ export const FolderGroup = memo(function FolderGroup({
     let raf = 0
     const fit = (): void => {
       raf = 0
+      const kids = Array.from(box.children) as HTMLElement[]
+      // pack: the items are absolutely placed, the box gets the packed size
+      let packed: { w: number; h: number } | null = null
+      if (dir === 'pack') {
+        box.dataset.packed = ''
+        packed = packItems(kids)
+      } else {
+        unpackItems(box)
+      }
       let left = 0
       let top = 0
       let right = 0
       let bottom = 0
-      for (const el of Array.from(box.children) as HTMLElement[]) {
+      for (const el of kids) {
         const x = el.offsetLeft + Number(el.dataset.dx || 0)
         // a component's label sits above its frame (out of flow, in its top margin)
         const y = el.offsetTop + Number(el.dataset.dy || 0) - parseFloat(getComputedStyle(el).marginTop || '0')
@@ -95,10 +136,15 @@ export const FolderGroup = memo(function FolderGroup({
       }
       const pr = parseFloat(box.style.paddingRight || '0')
       const pb = parseFloat(box.style.paddingBottom || '0')
-      const nr = Math.max(0, Math.ceil(right - (box.clientWidth - pr)))
-      const nb = Math.max(0, Math.ceil(bottom - (box.clientHeight - pb)))
+      const nr = Math.max(0, Math.ceil(right - (packed ? packed.w : box.clientWidth - pr)))
+      const nb = Math.max(0, Math.ceil(bottom - (packed ? packed.h : box.clientHeight - pb)))
       if (nr !== pr) box.style.paddingRight = nr ? `${nr}px` : ''
       if (nb !== pb) box.style.paddingBottom = nb ? `${nb}px` : ''
+      if (packed) {
+        // border-box: the size includes the padding around moved items
+        box.style.width = `${Math.ceil(packed.w) + nr}px`
+        box.style.height = `${Math.ceil(packed.h) + nb}px`
+      }
       // bg is positioned in the section: the container starts after its padding (and the header)
       const pad = parseFloat(getComputedStyle(box.parentElement as HTMLElement).paddingTop || '0')
       bg.style.left = `${Math.min(0, Math.floor(box.offsetLeft + left - pad))}px`
@@ -109,7 +155,8 @@ export const FolderGroup = memo(function FolderGroup({
     }
     const ro = new ResizeObserver(schedule)
     for (const el of Array.from(box.children)) ro.observe(el)
-    schedule()
+    // now, before paint: switching to / from pack must not flash the flex flow
+    fit()
     return () => {
       ro.disconnect()
       cancelAnimationFrame(raf)
@@ -151,12 +198,6 @@ export const FolderGroup = memo(function FolderGroup({
           </p>
           {node.virtual && <span className="shrink-0 text-xs text-ink-3">new folder</span>}
         </div>
-        {origin && (
-          <p className="min-w-0 truncate text-xs text-ink-3" style={{ maxWidth: '60ch' }}>
-            from message {origin.index}: {origin.brief}
-          </p>
-        )}
-        {top && origin?.reply && <Reply text={origin.reply} />}
       </header>
 
       {empty ? null : (
@@ -183,7 +224,7 @@ function FileFrame({ file, env, groupSelected }: { file: CanvasFile; env: GroupE
     <ComponentFrame
       id={file.artifact_id}
       selKey={key}
-      label={baseOf(file.path)}
+      label={componentLabel(file.path)}
       score={file.score}
       draft={false}
       selected={groupSelected || own}
@@ -229,7 +270,7 @@ const PendingCard = memo(function PendingCard({ runId, env }: { runId: string; e
 
   const running = run == null || !isTerminalRunStatus(run.status)
   const msg = env.messageOf(runId)
-  const refs = (run?.context_paths ?? []).map(baseOf)
+  const refs = (run?.context_paths ?? []).map(componentLabel)
   const reply = run?.reply || msg?.reply || ''
 
   return (

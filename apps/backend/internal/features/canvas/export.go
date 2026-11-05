@@ -239,19 +239,26 @@ func htmlDocument(title string, src []byte) []byte {
 
 /* ---------- PNG ---------- */
 
-// exportVariant: light, white, 2x, as tall as the content allows.
-func exportVariant() render.Variant {
+// exportVariant: light, white, as tall as the content allows, at `dpr`.
+func exportVariant(dpr float64) render.Variant {
 	return render.Variant{
 		Name: "export", Width: exportWidth, StageHeight: 40, ColorScheme: "light",
-		Background: "#ffffff", DeviceScaleFactor: 2, MaxHeight: 4800,
+		Background: "#ffffff", DeviceScaleFactor: dpr, MaxHeight: 4800,
 	}
 }
 
 func (e exporter) screenshot(ctx context.Context, src string) ([]byte, error) {
-	if e.renderer == nil {
+	return Screenshot(ctx, e.renderer, src, 2)
+}
+
+// Screenshot renders a component the way the canvas shows it (1280 px stage,
+// light, narrow content cropped with a margin) as a PNG at `dpr`. Used by the
+// PNG export (2x) and by vision-mode chat messages (the engine).
+func Screenshot(ctx context.Context, renderer render.Renderer, src string, dpr float64) ([]byte, error) {
+	if renderer == nil {
 		return nil, apperr.Unavailable("screenshots are not available on this server")
 	}
-	res, err := e.renderer.Render(ctx, render.Request{HTML: src, Variants: []render.Variant{exportVariant()}})
+	res, err := renderer.Render(ctx, render.Request{HTML: src, Variants: []render.Variant{exportVariant(dpr)}})
 	switch {
 	case errors.Is(err, render.ErrNoBrowser):
 		return nil, apperr.Unavailable("screenshots are not available on this server").Wrap(err)

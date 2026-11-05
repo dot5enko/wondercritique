@@ -136,13 +136,21 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
 `pages/chat/` are no longer routed — dead code kept for now; `RunProgress.tsx` and `rail.tsx`
 (`groupThreads`) are still used). Full screen, no Shell/sidebar, touch-first (tablet/phone).
 
-- **Chat list** (`pages/chat/index.tsx`): header (app name, Settings icon for admins → studio,
-  logout, primary "New chat" → `/chat/new`) + one list of threads from `useThreads()` (status dot,
-  title = first brief, relative time, message count) → `/chat/<id>`. Nothing else.
+- **Chat list** (`pages/chat/index.tsx`, updated 2026-11-05): header (app name, Settings icon for
+  admins → studio, logout) + search `Input` (250 ms debounce, clear X / Esc) + one list card whose
+  **first row is a full-width "New chat"** (→ `/chat/new`), then the chats (status dot, title,
+  relative time, message count) → `/chat/<id>`. Data: `usePagedThreads(search)` (`threads.tsx`) —
+  `GET /threads` chunks of `THREADS_PAGE` (20), a new search restarts from offset 0 (superseded
+  requests aborted), appended chunks are de-duplicated by id; a centered rounded-full **"Load
+  more" pill** under the card while `next_offset != null` (spinner while loading, "Couldn't load —
+  retry" after a failed chunk). Search matches in titles are wrapped in `<mark>` `bg-yellow-200`
+  (`Highlight`, case-insensitive regex). Empty search → `No chats match “…”`. The list page is not
+  under a `ThreadsProvider` any more; it refetches on every mount.
 - **Canvas page** (`pages/chat/canvas/index.tsx`): one chat. Model: **folder = group**, **file =
   component** — the canvas is a view of `GET /threads/{id}/canvas` (`api/canvas.ts`), the same
   files the agents read under `/canvas`. Data: the canvas (files + layout) **and** the thread's
-  runs (`listRuns filter[thread_id]`, oldest first; message numbers, briefs, pending cards). The
+  runs (`listRuns filter[thread_id]`, oldest first; message numbers, briefs, pending cards; the
+  chat title = `threadTitle` of the first run's brief — the canvas no longer uses `useThreads`). The
   canvas reloads when a run reaches a terminal state (a pending card reports it via `onStatus` and
   the listed status was non-terminal) and after every canvas operation.
   `canvas/tree.ts` `buildTree(files, pendingRuns)` builds the folders (implicit, from paths;
@@ -191,13 +199,13 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   Its look is a separate `aria-hidden` background div (`-z-10`, `bg-ink/[0.035]`, dashed border for
   virtual folders, outline when selected — widths use `--inv-k`) that extends left / up around
   items moved past the block's edge. Header = folder name (`folderLabel`: last segment + `/`,
-  root = "Top level"; full path as tooltip; "new folder" tag when virtual) + "from message N:
-  brief" + (top groups) the chat agent's reply of that message
-  (`Reply`: markdown in a rounded block, `line-clamp-4`, tap toggles full text,
-  `data-canvas-ui`); `CHROME_ZOOM` (`zoom: min(4, max(1, --inv-k))`) keeps
+  root = "Top level"; full path as tooltip; "new folder" tag when virtual) — nothing else since
+  2026-11-05 (the originating message + the agent's reply moved to the "Show message & reply"
+  modal, see Context menu); `CHROME_ZOOM` (`zoom: min(4, max(1, --inv-k))`) keeps
   it readable zoomed out. Items container (wrap default `max-w-[5400px]`, `row`, `col` per
-  `layout.dir[path]`; gaps x 64 / y 80): the folder's files (`ComponentFrame`, label = file name +
-  score), then pending cards, then subfolders (nested `FolderGroup`s). A rAF + ResizeObserver
+  `layout.dir[path]`; gaps x 64 / y 80): the folder's files (`ComponentFrame`, label =
+  `componentLabel` (file name without `.html`, `tree.ts`) + score), then pending cards, then
+  subfolders (nested `FolderGroup`s). A rAF + ResizeObserver
   layout effect pads the container right/bottom and moves the background left/top around moved
   items (no layout shift). Everything the groups need comes in one memoized `GroupEnv` (selection
   set, layout, `messageOf`, `onRetry`, `onStatus`).
@@ -206,7 +214,7 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   `reply`, no file of the run on the canvas) shows as a dashed card `[data-pending=<run>]`
   inside the group of `run.canvas_folder` (virtual folders are created in the tree when it doesn't
   exist yet): message number + brief, "about <file names>" (`run.context_paths`), the reply
-  (`Reply`), `RunProgress` while running, error line, Stop / Try again (failed, cancelled,
+  (`Reply`: markdown, `line-clamp-4`, tap toggles full text, `data-canvas-ui`), `RunProgress` while running, error line, Stop / Try again (failed, cancelled,
   interrupted) / Reconnect, and the latest iteration's html artifacts as drafts
   (`useRunLive` + `componentsOf`; gen_components results appear here live; frames without a
   selection key). Completed runs with files show nothing extra — their files are in the tree.
@@ -261,8 +269,14 @@ Replaces the timeline/floating-chat page (the old `RunCard.tsx` / `DesignStage.t
   Arrange vertically / horizontally (only when arranging applies), Reset position & size, **Rename
   folder…** (one non-root group: prompt → `moveCanvasPath(folder, parent/name)`),
   **Move to folder…** (components only: prompt with a folder path → one move per file), Delete from
-  canvas, Open preview + Copy HTML (single component), **Download HTML / Download PNG @2x** (see
-  Downloads), Clear selection. (No run-details drawer /
+  canvas, **Show message & reply** (one group / component whose origin run is in the thread:
+  component → `file.run_id`, group → `node.firstRun`; opens `MessageModal` — "Message N", the
+  brief, the agent's reply as markdown), Open preview (`PreviewPanel`, 2026-11-05: fixed full-screen
+  panel sliding in from the right, `translate-x-full` ↔ `0` transition, always mounted and keeps the
+  last component while sliding out; big X top-left or Escape slides it back; iframe fills the rest)
+  + Copy HTML (single component), **Download
+  HTML / Download PNG @2x** (see Downloads), Clear selection. Chips, menu title and preview title
+  use `componentLabel` (no `.html`). (No run-details drawer /
   Details buttons on the canvas since 2026-11-05 — agent + tools runs made them obsolete; the
   full `/runs/:id` page still exists.) On empty canvas: Fit
   everything, Go to latest, New message, Reset layout (when anything is customised).

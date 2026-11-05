@@ -102,3 +102,6 @@ export function filesBelow(n: FolderNode): CanvasFile[] {
 
 /** Display name of a folder. */
 export const folderLabel = (path: string): string => (path === '/' ? 'Top level' : `${baseOf(path)}/`)
+
+/** Display name of a component file (no `.html`). */
+export const componentLabel = (path: string): string => baseOf(path).replace(/\.html?$/i, '')

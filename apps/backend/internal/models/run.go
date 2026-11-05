@@ -72,6 +72,9 @@ type Run struct {
 	CanvasFolder string `gorm:"size:512"`
 	// CanvasNotes are the user's canvas operations delivered to this run.
 	CanvasNotes []string `gorm:"serializer:json"`
+	// Vision (agent mode): the selected components are rendered and the
+	// screenshots go to the chat agent with the message.
+	Vision bool
 
 	Status         string `gorm:"index;size:16"`
 	Iteration      int

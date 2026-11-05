@@ -358,12 +358,12 @@ func TestPutLayoutValidates(t *testing.T) {
 			"g:/stale": {X: 5}, "c:/a/b/stale.html": {X: 6}, "weird": {X: 7},
 		},
 		Scale: map[string]float64{"/a/b/x.html": 9, "/nope.html": 1},
-		Dir:   map[string]string{"/a": "col", "/a/b": "diagonal"},
+		Dir:   map[string]string{"/a": "pack", "/a/b": "diagonal"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Pos) != 4 || out.Scale["/a/b/x.html"] != maxScale || len(out.Scale) != 1 || len(out.Dir) != 1 {
+	if len(out.Pos) != 4 || out.Scale["/a/b/x.html"] != maxScale || len(out.Scale) != 1 || len(out.Dir) != 1 || out.Dir["/a"] != "pack" {
 		t.Errorf("layout = %+v", out)
 	}
 	big := models.CanvasLayout{Pos: map[string]models.Point{}}

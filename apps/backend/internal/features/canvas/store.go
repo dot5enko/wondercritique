@@ -621,7 +621,7 @@ func (s *Store) PutLayout(ctx context.Context, thread, owner string, l models.Ca
 			}
 		}
 		for k, v := range l.Dir {
-			if folders[k] && (v == "row" || v == "col") {
+			if folders[k] && (v == "row" || v == "col" || v == "pack") {
 				out.Dir[k] = v
 			}
 		}

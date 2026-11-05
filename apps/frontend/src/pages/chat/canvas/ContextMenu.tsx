@@ -14,6 +14,8 @@ export interface MenuAction {
   icon?: LucideIcon
   hint?: string
   disabled?: boolean
+  /** A toggle that is on (highlighted). */
+  active?: boolean
   onSelect: () => void
 }
 
@@ -80,11 +82,12 @@ export function ContextMenu({
       {sections.map((items, i) => (
         <div key={i}>
           {i > 0 && <div role="separator" className="mx-1 my-1 h-px bg-line" />}
-          {items.map(({ key, label, icon: Icon, hint, disabled, onSelect }) => (
+          {items.map(({ key, label, icon: Icon, hint, disabled, active, onSelect }) => (
             <button
               key={key}
               type="button"
-              role="menuitem"
+              role={active == null ? 'menuitem' : 'menuitemcheckbox'}
+              aria-checked={active == null ? undefined : active}
               disabled={disabled}
               onClick={() => {
                 onClose()
@@ -93,9 +96,10 @@ export function ContextMenu({
               className={cx(
                 'flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-base text-ink outline-none transition-colors duration-100 hover:bg-app focus-visible:bg-app pointer-coarse:h-11 pointer-coarse:text-sm',
                 disabled && 'pointer-events-none opacity-40',
+                active && 'text-accent',
               )}
             >
-              {Icon && <Icon size={15} className="shrink-0 text-ink-3" />}
+              {Icon && <Icon size={15} className={cx('shrink-0', active ? 'text-accent' : 'text-ink-3')} />}
               <span className="min-w-0 flex-1 truncate">{label}</span>
               {hint && <span className="text-2xs text-ink-3">{hint}</span>}
             </button>

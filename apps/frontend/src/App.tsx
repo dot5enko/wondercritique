@@ -19,7 +19,6 @@ import { Outlet, createBrowserRouter, redirect, RouterProvider } from 'react-rou
 import { AuthProvider, BootScreen, RequireAdmin, RequireAuth } from './features/auth'
 import Shell from './pages/shell'
 import { SetupGate } from './pages/setup/gate'
-import { ThreadsProvider } from './pages/chat/threads'
 
 const LoginPage = lazy(() => import('./pages/login'))
 const SetupPage = lazy(() => import('./pages/setup'))
@@ -61,9 +60,7 @@ const router = createBrowserRouter([
         // Chats are full screen: no shell, no sidebar.
         element: (
           <RequireAuth>
-            <ThreadsProvider>
-              <Outlet />
-            </ThreadsProvider>
+            <Outlet />
           </RequireAuth>
         ),
         children: [

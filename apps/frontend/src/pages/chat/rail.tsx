@@ -8,7 +8,7 @@ import { RotateCw } from 'lucide-react'
 import { Button, Skeleton, cx } from '../../ui'
 import { relativeTime } from '../../components'
 import { runStatusTone } from '../runs/shared'
-import type { RunListItem, RunStatus } from '../../api/runs'
+import type { RunStatus, ThreadListItem } from '../../api/runs'
 
 /** One chat thread as shown in the rail. */
 export interface ThreadSummary {
@@ -20,30 +20,14 @@ export interface ThreadSummary {
   runs: number
 }
 
-/** Groups a flat run list into threads (`thread_id ?? id`), newest first. */
-export function groupThreads(items: RunListItem[]): ThreadSummary[] {
-  const map = new Map<string, { runs: RunListItem[] }>()
-  for (const r of items) {
-    const key = r.thread_id || r.id
-    const bucket = map.get(key) ?? { runs: [] }
-    bucket.runs.push(r)
-    map.set(key, bucket)
-  }
-  const threads: ThreadSummary[] = []
-  for (const [id, { runs }] of map) {
-    const sorted = [...runs].sort((a, b) => a.created_at.localeCompare(b.created_at))
-    const first = sorted[0]
-    const last = sorted[sorted.length - 1]
-    const brief = first.input?.['brief']
-    threads.push({
-      id,
-      title: typeof brief === 'string' && brief.trim() ? brief.trim() : `Chat · ${new Date(first.created_at).toLocaleDateString()}`,
-      status: last.status,
-      at: last.created_at,
-      runs: sorted.length,
-    })
-  }
-  return threads.sort((a, b) => b.at.localeCompare(a.at))
+/** Title of a chat: its first brief, else its start date. */
+export function threadTitle(brief: string, createdAt: string): string {
+  return brief.trim() || `Chat · ${new Date(createdAt).toLocaleDateString()}`
+}
+
+/** A `GET /threads` item as shown in the lists. */
+export function threadSummary(t: ThreadListItem): ThreadSummary {
+  return { id: t.id, title: threadTitle(t.title, t.created_at), status: t.status, at: t.updated_at, runs: t.runs }
 }
 
 export function ThreadList({

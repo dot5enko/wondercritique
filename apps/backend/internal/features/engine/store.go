@@ -41,6 +41,7 @@ type RunListItem struct {
 	CanvasFolder string `json:"canvas_folder"`
 	Mode         string `json:"mode"`  // pipeline | agent
 	Reply        string `json:"reply"` // the chat agent's answer ("" for pipelines)
+	Vision       bool   `json:"vision"` // the agent got screenshots of the selection
 }
 
 func modeOf(r *models.Run) string {
@@ -104,6 +105,7 @@ type RunDetail struct {
 	Mode              string             `json:"mode"`
 	AgentID           string             `json:"agent_id,omitempty"`
 	Reply             string             `json:"reply"`
+	Vision            bool               `json:"vision"`
 	Steps             []StepView         `json:"steps"`
 	Artifacts         []ArtifactView     `json:"artifacts"`
 	// Results are the run's results in display order: one entry (the selected
@@ -169,7 +171,7 @@ func (e *Engine) RunDetail(ctx context.Context, id string, v Viewer) (*RunDetail
 		IsTest: run.IsTest, Input: run.Input, Iteration: run.Iteration, BestArtifactID: run.BestArtifactID,
 		Usage: &run.Usage, Cost: run.Cost, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, ThreadID: run.ThreadID, PipelineBody: run.Snapshot,
 		ContextPaths: nonNil(run.ContextPaths), CanvasFolder: run.CanvasFolder, CanvasNotes: nonNil(run.CanvasNotes),
-		CanvasPaths: []string{}, Mode: modeOf(run), AgentID: run.AgentID, Reply: run.Reply,
+		CanvasPaths: []string{}, Mode: modeOf(run), AgentID: run.AgentID, Reply: run.Reply, Vision: run.Vision,
 		Steps: make([]StepView, 0, len(steps)), Artifacts: make([]ArtifactView, 0, len(arts)),
 		Results: make([]ResultView, 0, len(results)),
 	}
@@ -230,7 +232,7 @@ func (e *Engine) ListRuns(ctx context.Context, v Viewer, p ListParams) ([]RunLis
 			ID: r.ID, Status: r.Status, Pipeline: pipelineRef(r), Iterations: r.Iteration,
 			BestScore: r.BestScore, Usage: &r.Usage, Cost: r.Cost, CreatedAt: r.CreatedAt,
 			ThreadID: r.ThreadID, Input: r.Input, ContextPaths: nonNil(r.ContextPaths), CanvasFolder: r.CanvasFolder,
-			Mode: modeOf(r), Reply: r.Reply,
+			Mode: modeOf(r), Reply: r.Reply, Vision: r.Vision,
 		})
 	}
 	return out, nil

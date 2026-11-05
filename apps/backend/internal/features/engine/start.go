@@ -38,6 +38,9 @@ type StartParams struct {
 	Input map[string]json.RawMessage
 	// ContextPaths are canvas files or folders of the thread the message is about.
 	ContextPaths []string
+	// Vision (agent mode) renders the selected components and gives the
+	// agent the screenshots with the message.
+	Vision bool
 }
 
 const (
@@ -110,6 +113,17 @@ func (e *Engine) Start(ctx context.Context, p StartParams) (*models.Run, error) 
 	run.CanvasFolder = folder
 	for _, f := range cr.selected {
 		run.ContextPaths = append(run.ContextPaths, f.Path)
+	}
+	if p.Vision {
+		switch {
+		case agent == nil:
+			return nil, apperr.Invalid("invalid input", map[string]string{"vision": "only for agent (chat) messages"})
+		case len(cr.selected) == 0:
+			return nil, apperr.Invalid("invalid input", map[string]string{"vision": "select a component to look at"})
+		case len(cr.selected) > maxVisionShots:
+			return nil, apperr.Invalid("invalid input", map[string]string{"vision": fmt.Sprintf("at most %d components can be looked at at once", maxVisionShots)})
+		}
+		run.Vision = true
 	}
 	if ver != nil {
 		v := ver.Version

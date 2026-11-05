@@ -35,7 +35,7 @@ chat, no sidebar on chat routes). Base stack unchanged.
 | `/login` | public | email-code login (start → verify, resend countdown from 60 s / `Retry-After`) |
 | `/setup` | admin, no shell | first-run wizard (2026-11-05): provider (openrouter/meta) + API key + test, Meta-family model → published `default` model set, done; `SetupGate` (in `AuthProvider`) redirects admins with `needs_setup` here; re-runnable, shows "already set up" when a ready provider exists |
 | `/` | auth | redirect → `/chat` |
-| `/chat` | auth, **no shell** | chat list + "New chat" (`pages/chat/index.tsx`); legacy `?thread=x` redirects (loader) to `/chat/x` |
+| `/chat` | auth, **no shell** | chat list: search + full-width "New chat" first row + chats in chunks with a "Load more" pill (`pages/chat/index.tsx`, `GET /threads`); legacy `?thread=x` redirects (loader) to `/chat/x` |
 | `/chat/:threadId` | auth, **no shell** | full-screen design canvas of one chat (`pages/chat/canvas/`, see `docs/frontend.studio-ui.md`); `threadId = new` is a new chat (a param value, not its own route, so the canvas stays mounted when the first message turns it into `/chat/<thread>`) |
 | `/runs/:id` | auth | full run detail (`RunDetailView` from `src/pages/runs/detail.tsx`; also embedded in the canvas drawer). `/runs` redirects to `/chat` |
 | `/studio/pipelines` | admin | list + `?id=` graph editor (`src/pages/studio/pipelines/`) |
@@ -45,7 +45,7 @@ chat, no sidebar on chat routes). Base stack unchanged.
 | `/settings/providers` | admin | LLM providers (two-pane list/detail); `/settings` redirects here |
 
 **Chat routes skip the Shell (2026-11-04):** `/chat` and `/chat/:threadId` live in their own
-route group (`RequireAuth` + `ThreadsProvider` + `Outlet`) — full screen, no sidebar. The Shell
+route group (`RequireAuth` + `Outlet`; no `ThreadsProvider` since 2026-11-05) — full screen, no sidebar. The Shell
 below only frames `/runs/:id` and the settings/studio pages.
 
 Shell layout (`src/pages/shell.tsx`, 2026-11-02): viewport frame + **one** sidebar column (`w-60`),
@@ -70,8 +70,9 @@ regardless of the stored flag. State persisted in localStorage `wc_sidebar_colla
 `pages/shell.tsx`) → `{ sidebarCollapsed, toggleSidebar }`; `sidebarCollapsed` is the effective
 value (false outside `/chat`). The chat page's timeline + composer column is
 `w-full max-w-[1250px]` (fluid on smaller screens), `max-w-[1400px]` when collapsed.
-The thread list is shared via `ThreadsProvider`/`useThreads()` (`pages/chat/threads.tsx`, one
-`listRuns({limit:100})` query) — mounted by the Shell and, separately, by the chat route group.
+The Shell sidebar's thread list comes from `ThreadsProvider`/`useThreads()` (`pages/chat/threads.tsx`,
+one `listThreads({limit:50})` query = `GET /threads`, mapped by `threadSummary` in `rail.tsx`) —
+mounted only by the Shell (2026-11-05). The chat list page uses `usePagedThreads` instead.
 Non-admins never see Settings and get a Forbidden page on admin routes. There is deliberately
 **no standalone agent chat page** (removed 2026-11-02); the design canvas talks to the
 `canvas-chat` agent through agent-mode runs (2026-11-04, `docs/backend.chat-agent.md`), other
@@ -135,7 +136,8 @@ vhost with SPA fallback (see `docs/deploy.ansible.md`). Production API is cross-
   model-set editors; `PATCH /studio/{kind}/{id}`); slug is immutable. Skills/rules/pipelines editors
   have no identity card yet (2026-11-02).
 - Skill "run script in the sandbox" has no endpoint yet (`TODO` in `SkillsEditor.tsx`).
-- Design chat thread titles use `input.brief` of the first run (list items carry `input`; fallback: date).
+- Design chat thread titles use `input.brief` of the first run (server-side `title` of `GET /threads`;
+  fallback: date via `threadTitle`). Search covers titles only, not follow-up messages.
 - Cross-run compare (`?compare=`) not implemented (iterations-compare is).
 - Deprecated-provider toggle in Settings skipped (models.dev marks models, not providers, deprecated).
 - `docs/llm.models-catalog.md` is the catalog format reference for the Settings page (now parsed

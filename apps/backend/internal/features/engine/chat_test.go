@@ -99,6 +99,64 @@ func TestChatAgentKeepsEveryComponent(t *testing.T) {
 	}
 }
 
+func TestChatAgentVisionMode(t *testing.T) {
+	h := setup(t)
+	h.chatScript(2, "Buttons", "primary.html", "ghost.html")
+	id, w := h.start(h.user, `{"agent":"canvas-chat","input":{"brief":"two buttons"}}`)
+	if id == "" {
+		t.Fatalf("start: %d %s", w.Code, w.Body)
+	}
+	h.waitDone(id)
+
+	// Validation: needs a selection, agent mode, ≤ maxVisionShots files.
+	if _, w := h.start(h.user, `{"agent":"canvas-chat","thread_id":"`+id+`","vision":true,"input":{"brief":"x"}}`); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "vision") {
+		t.Errorf("vision without selection: %d %s", w.Code, w.Body)
+	}
+
+	h.chatScript(0, "")
+	second, w := h.start(h.user, `{"agent":"canvas-chat","thread_id":"`+id+`","vision":true,"context_paths":["/buttons/ghost.html","/buttons/primary.html"],"input":{"brief":"is the contrast ok?"}}`)
+	if second == "" {
+		t.Fatalf("vision start: %d %s", w.Code, w.Body)
+	}
+	run := h.waitDone(second)
+	if run.Status != models.RunCompleted || !run.Vision {
+		t.Fatalf("vision run = %s vision=%v err=%q", run.Status, run.Vision, run.Error)
+	}
+	calls := h.agents.callsOf(studio.ChatAgentSlug)
+	got := calls[len(calls)-1].Samples
+	brief, _ := got["brief"].(string)
+	if !strings.HasPrefix(brief, "<meta>Vision mode") || !strings.Contains(brief, "/buttons/ghost.html, /buttons/primary.html") || !strings.HasSuffix(brief, "is the contrast ok?") {
+		t.Errorf("brief = %q", brief)
+	}
+	refs, _ := got[visionSample].([]string)
+	if len(refs) != 2 || !strings.HasPrefix(refs[0], "wcblob://") {
+		t.Fatalf("previews = %v", got[visionSample])
+	}
+	d := h.detail(second)
+	images := 0
+	for _, a := range d.Artifacts {
+		if a.Kind == models.ArtifactImage {
+			images++
+		}
+	}
+	if images != 2 || !d.Vision {
+		t.Errorf("detail: images=%d vision=%v", images, d.Vision)
+	}
+	// The stored message stays the user's text.
+	if strings.Contains(string(d.Input), "<meta>") {
+		t.Errorf("input = %s", d.Input)
+	}
+
+	// A render failure on every file fails the message.
+	h.renderer.mu.Lock()
+	h.renderer.err = fmt.Errorf("boom")
+	h.renderer.mu.Unlock()
+	third, _ := h.start(h.user, `{"agent":"canvas-chat","thread_id":"`+id+`","vision":true,"context_paths":["/buttons"],"input":{"brief":"look"}}`)
+	if r := h.waitDone(third); r.Status != models.RunFailed || !strings.Contains(r.Error, "preview") {
+		t.Errorf("render failure: %s %q", r.Status, r.Error)
+	}
+}
+
 func TestChatAgentStartValidation(t *testing.T) {
 	h := setup(t)
 	if _, w := h.start(h.user, `{"agent":"nope","input":{"brief":"x"}}`); w.Code != http.StatusNotFound {

@@ -19,15 +19,20 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNavigate, useParams } from 'react-router'
 import {
   ArrowLeft,
+  ArrowLeftRight,
+  ArrowUpDown,
   Columns3,
   Copy,
+  Eye,
   FileDown,
   FolderInput,
   FolderPen,
   ImageDown,
+  LayoutDashboard,
   ListChecks,
   Maximize,
   Maximize2,
+  MessageSquareText,
   Minus,
   Moon,
   PenLine,
@@ -43,7 +48,7 @@ import {
 import { Button, cx, IconButton } from '../../../ui'
 import { Callout } from '../../../ui/Display'
 import { Modal } from '../../../components/Modal'
-import { ErrorState, isBackendMissing } from '../../../components'
+import { ErrorState, isBackendMissing, Markdown } from '../../../components'
 import {
   isTerminalRunStatus,
   listRuns,
@@ -66,15 +71,15 @@ import {
   type CanvasFile,
 } from '../../../api/canvas'
 import { saveFile } from '../../../api/client'
-import { useThreads } from '../threads'
+import { threadTitle } from '../rail'
 import { useViewport, type HandleInfo, type MenuInfo, type TapInfo } from './useViewport'
 import { FolderGroup, type GroupEnv } from './FolderGroup'
-import { buildTree, filesBelow, folderLabel, indexFolders, topGroups, type FolderNode } from './tree'
+import { buildTree, componentLabel, filesBelow, folderLabel, indexFolders, topGroups, type FolderNode } from './tree'
 import { ContextMenu, type MenuAction } from './ContextMenu'
-import { SelectionBar } from './SelectionBar'
+import { SelectionBar, type BarControls } from './SelectionBar'
 import { Composer, type ContextChip } from './Composer'
 import { loadComponentHtml, setCanvasMotion, useComponentHtml } from './ComponentFrame'
-import { hasArrangement, MAX_SCALE, MIN_SCALE, useCanvasLayout, type GroupDir, type Point } from './layout'
+import { hasArrangement, MAX_SCALE, MIN_SCALE, PACK_GAP, packAspect, packRects, useCanvasLayout, type GroupDir, type Point } from './layout'
 
 const EXAMPLES = [
   'A pricing section with three tiers, dark theme, rounded cards',
@@ -115,8 +120,8 @@ const QUICK_ACTIONS: { key: string; label: string; icon: typeof Sparkles; prompt
 /** Screen space kept free around fitted content (top bar, composer). */
 const FIT_INSET = { top: 72, right: 24, bottom: 150, left: 24 }
 
-/** Gaps of "Arrange" (= the flex gaps): components in a row / column, groups. */
-const ARRANGE_GAP = { row: 64, col: 80, group: 160 }
+/** Gaps of "Arrange" (= the flex gaps): components in a row / column / packed, groups. */
+const ARRANGE_GAP = { row: 64, col: 80, pack: PACK_GAP, group: 160 }
 
 /** The chat title collapses to the back arrow this long after the page opens. */
 const TITLE_COLLAPSE_MS = 3500
@@ -128,6 +133,8 @@ const SHOW_ZOOM_CONTROLS = false
 
 /** Files one message may be about (the engine's cap on `context_paths`). */
 const MAX_CONTEXT_FILES = 12
+/** Components one vision-mode message may show (the engine renders each one). */
+const MAX_VISION_FILES = 6
 
 const selectorOf = (key: string): string => `[data-sel="${CSS.escape(key)}"]`
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v))
@@ -150,12 +157,11 @@ export default function CanvasPage() {
   const { threadId: param } = useParams()
   const threadId = param && param !== 'new' ? param : null
   const navigate = useNavigate()
-  const { query: threadsQ, threads } = useThreads()
-  const title = threads.find((t) => t.id === threadId)?.title ?? (threadId ? '' : 'New chat')
-
   /* ---------- the thread's runs (= messages) ---------- */
 
   const [runs, setRuns] = useState<RunListItem[]>([])
+  const brief0 = runs[0]?.input?.['brief']
+  const title = !threadId ? 'New chat' : runs[0] ? threadTitle(typeof brief0 === 'string' ? brief0 : '', runs[0].created_at) : ''
   const [runsError, setRunsError] = useState<unknown>(null)
   const [runsLoading, setRunsLoading] = useState(false)
   const runsRef = useRef(runs)
@@ -223,13 +229,6 @@ export default function CanvasPage() {
     }
   }, [threadId, loadCanvas, loadRuns])
 
-  // The chat list mirrors finished runs without polling.
-  const finished = Object.values(statuses).filter(isTerminalRunStatus).length
-  useEffect(() => {
-    if (finished > 0) threadsQ.reload()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finished])
-
   const runIndex = useMemo(() => new Map(runs.map((r, i) => [r.id, i + 1])), [runs])
   const messageOf = useCallback((runId: string) => {
     const r = runs.find((x) => x.id === runId)
@@ -277,7 +276,7 @@ export default function CanvasPage() {
 
   const chips: ContextChip[] = selection.map((k) => ({
     key: k,
-    label: k.startsWith('g:') ? folderLabel(k.slice(2)) : baseOf(k.slice(2)),
+    label: k.startsWith('g:') ? folderLabel(k.slice(2)) : componentLabel(k.slice(2)),
   }))
 
   /* ---------- viewport ---------- */
@@ -287,7 +286,8 @@ export default function CanvasPage() {
   const contentRef = useRef<HTMLDivElement>(null)
   /** Keep fitting the newest group while the user hasn't moved the view. */
   const autoFit = useRef(true)
-  const [menu, setMenu] = useState<MenuInfo | null>(null)
+  /** The open context menu; `toolbar` when it was opened by the toolbar's More (adds its orientation). */
+  const [menu, setMenu] = useState<(MenuInfo & { toolbar?: BarControls }) | null>(null)
 
   const onTap = ({ target, additive }: TapInfo): void => {
     if (!target) {
@@ -483,6 +483,8 @@ export default function CanvasPage() {
   /* ---------- misc state ---------- */
 
   const [previewPath, setPreviewPath] = useState<string | null>(null)
+  /** Run whose message + reply the message modal shows. */
+  const [messageRunId, setMessageRunId] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null)
   const [exporting, setExporting] = useState(false)
   useEffect(() => {
@@ -497,15 +499,26 @@ export default function CanvasPage() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  /** Vision mode: the next message carries rendered previews of the selection. */
+  const [vision, setVision] = useState(false)
+  // nothing selected → nothing to look at
+  useEffect(() => {
+    if (selection.length === 0) setVision(false)
+  }, [selection.length])
 
-  /** Sends a message about `paths` (files / folders of the canvas). */
-  const send = async (message: string, paths: string[]): Promise<void> => {
+  /** Sends a message about `paths` (files / folders of the canvas); `look` = with previews. */
+  const send = async (message: string, paths: string[], look = false): Promise<void> => {
     const brief = message.trim()
     if (!brief || sending) return
     const contextPaths = threadId ? [...new Set(paths)] : []
     const count = expand(contextPaths.map((p) => (fileByPath.has(p) ? `c:${p}` : `g:${p}`))).length
     if (count > MAX_CONTEXT_FILES) {
       setSendError(`A message can be about at most ${MAX_CONTEXT_FILES} components (${count} selected).`)
+      return
+    }
+    const withVision = look && count > 0
+    if (withVision && count > MAX_VISION_FILES) {
+      setSendError(`Vision mode looks at up to ${MAX_VISION_FILES} components at once (${count} selected).`)
       return
     }
     setSending(true)
@@ -516,31 +529,33 @@ export default function CanvasPage() {
         input: { brief },
         ...(threadId ? { thread_id: threadId } : {}),
         ...(contextPaths.length > 0 ? { context_paths: contextPaths } : {}),
+        ...(withVision ? { vision: true } : {}),
       })
       setText('')
       setSelection([])
       setSelectMode(false)
+      setVision(false)
       autoFit.current = true
       if (!threadId) navigate(`/chat/${encodeURIComponent(res.thread_id || res.id)}`, { replace: true })
       else void loadRuns(threadId)
-      threadsQ.reload()
     } catch (err: unknown) {
       setSendError(isBackendMissing(err) ? "The runs backend can't be reached." : err instanceof Error ? err.message : 'Couldn\'t send the message.')
     } finally {
       setSending(false)
     }
   }
-  const sendWithSelection = (message: string): void => void send(message, selection.flatMap(pathsOf))
+  const sendWithSelection = (message: string, look = vision): void => void send(message, selection.flatMap(pathsOf), look)
   const retryRef = useRef<(run: Run) => void>(() => {})
-  retryRef.current = (run) => void send(briefOf(run.input), (run.context_paths ?? []).filter((p) => fileByPath.has(p)))
+  retryRef.current = (run) => void send(briefOf(run.input), (run.context_paths ?? []).filter((p) => fileByPath.has(p)), run.vision === true)
   // stable, so the memoized groups don't re-render on every keystroke
   const retry = useCallback((run: Run) => retryRef.current(run), [])
 
   /* ---------- layout actions ---------- */
 
   /**
-   * Offsets that line the given same-level elements up in a row / column,
-   * in their current visual order, starting at their top-left-most corner.
+   * Offsets that line the given same-level elements up in a row / column, in
+   * their current visual order, or pack them into several columns (`pack`),
+   * starting at their top-left-most corner.
    */
   const lineUp = (keys: string[], dir: GroupDir, gap: number, base: Record<string, Point> = layout.pos): Record<string, Point> => {
     const world = worldRef.current
@@ -550,11 +565,18 @@ export default function CanvasPage() {
       return r ? [{ k, r, off: base[k] ?? { x: 0, y: 0 } }] : []
     })
     if (items.length < 2) return {}
-    items.sort((a, b) => (dir === 'col' ? a.r.y - b.r.y || a.r.x - b.r.x : a.r.x - b.r.x || a.r.y - b.r.y))
     const x0 = Math.min(...items.map((i) => i.r.x))
     const y0 = Math.min(...items.map((i) => i.r.y))
-    let cur = dir === 'col' ? y0 : x0
     const out: Record<string, Point> = {}
+    if (dir === 'pack') {
+      const at = packRects(items.map((i) => ({ w: i.r.w, h: i.r.h })), gap, packAspect())
+      items.forEach(({ k, r, off }, i) => {
+        out[k] = { x: off.x + x0 + at[i].x - r.x, y: off.y + y0 + at[i].y - r.y }
+      })
+      return out
+    }
+    items.sort((a, b) => (dir === 'col' ? a.r.y - b.r.y || a.r.x - b.r.x : a.r.x - b.r.x || a.r.y - b.r.y))
+    let cur = dir === 'col' ? y0 : x0
     for (const { k, r, off } of items) {
       const tx = dir === 'col' ? x0 : cur
       const ty = dir === 'col' ? cur : y0
@@ -722,7 +744,7 @@ export default function CanvasPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const typing = e.target instanceof HTMLElement && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')
-      if (e.key === 'Escape' && !menu && !previewPath) {
+      if (e.key === 'Escape' && !menu && !previewPath && !messageRunId) {
         setSelection([])
         setSelectMode(false)
       }
@@ -735,7 +757,7 @@ export default function CanvasPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [menu, previewPath, zoomBy, fitAll])
+  }, [menu, previewPath, messageRunId, zoomBy, fitAll])
 
   /* ---------- context menu ---------- */
 
@@ -743,10 +765,31 @@ export default function CanvasPage() {
   const single = selection.length === 1 && selection[0].startsWith('c:') ? fileByPath.get(selection[0].slice(2)) ?? null : null
   const arrangeActions: MenuAction[] = canArrange
     ? [
+        { key: 'pack', label: 'Arrange to fill space', icon: LayoutDashboard, onSelect: () => arrange('pack') },
         { key: 'col', label: 'Arrange vertically', icon: Rows3, onSelect: () => arrange('col') },
         { key: 'row', label: 'Arrange horizontally', icon: Columns3, onSelect: () => arrange('row') },
       ]
     : []
+  // Vision mode: the selected components are rendered server-side and the
+  // agent gets the screenshots with the next message.
+  const visionAction: MenuAction = vision
+    ? { key: 'vision', label: 'Vision mode: on', icon: Eye, active: true, onSelect: () => setVision(false) }
+    : {
+        key: 'vision',
+        label: 'Vision mode',
+        icon: Eye,
+        active: false,
+        hint: ids.length > MAX_VISION_FILES ? `max ${MAX_VISION_FILES}` : undefined,
+        disabled: ids.length === 0 || ids.length > MAX_VISION_FILES,
+        onSelect: () => {
+          setVision(true)
+          inputRef.current?.focus()
+        },
+      }
+  const describeAction: MenuAction = { key: 'change', label: 'Describe a change…', icon: PenLine, onSelect: () => inputRef.current?.focus() }
+  const previewAction: MenuAction | null = single
+    ? { key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewPath(single.path) }
+    : null
   const resetAction: MenuAction = { key: 'reset', label: 'Reset position & size', icon: RotateCcw, onSelect: resetSelectionLayout }
   const deleteAction: MenuAction = { key: 'delete', label: 'Delete from canvas', icon: Trash2, onSelect: deleteSelection }
   const fileActions: MenuAction[] = [
@@ -765,6 +808,12 @@ export default function CanvasPage() {
     onSelect: () => sendWithSelection(a.prompt(ids.length > 1)),
   }))
   const clearAction: MenuAction = { key: 'clear', label: 'Clear selection', icon: X, onSelect: clearSelection }
+  // The message a single selected group / component came from (shown on request, not on the canvas).
+  const singleKey = selection.length === 1 ? selection[0] : null
+  const originRun = !singleKey ? '' : single ? single.run_id : singleKey === 'g:/' ? tree.firstRun : singleKey.startsWith('g:') ? folders.get(singleKey.slice(2))?.firstRun ?? '' : ''
+  const messageActions: MenuAction[] = originRun && messageOf(originRun)
+    ? [{ key: 'message', label: 'Show message & reply', icon: MessageSquareText, onSelect: () => setMessageRunId(originRun) }]
+    : []
   // A single component downloads as itself; groups and multi-selections as a zip.
   const zipped = !single
   const downloadActions: MenuAction[] = ids.length === 0 ? [] : [
@@ -790,18 +839,19 @@ export default function CanvasPage() {
       ]]
     }
     return [
-      quickActions,
+      [visionAction, ...quickActions],
       [
-        { key: 'change', label: 'Describe a change…', icon: PenLine, onSelect: () => inputRef.current?.focus() },
+        describeAction,
         selectMode
           ? { key: 'done', label: 'Done selecting', icon: ListChecks, onSelect: () => setSelectMode(false) }
           : { key: 'more', label: 'Select more', icon: ListChecks, onSelect: () => setSelectMode(true) },
       ],
       [...arrangeActions, resetAction, ...fileActions, deleteAction],
       [
-        ...(single
+        ...messageActions,
+        ...(single && previewAction
           ? [
-              { key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewPath(single.path) },
+              previewAction,
               {
                 key: 'copy',
                 label: 'Copy HTML',
@@ -817,21 +867,22 @@ export default function CanvasPage() {
         ...downloadActions,
         clearAction,
       ],
+      // opened from the toolbar's More: its own setting
+      menu?.toolbar
+        ? [{
+            key: 'toolbar',
+            label: menu.toolbar.vertical ? 'Toolbar: make horizontal' : 'Toolbar: make vertical',
+            icon: menu.toolbar.vertical ? ArrowLeftRight : ArrowUpDown,
+            onSelect: menu.toolbar.toggle,
+          }]
+        : [],
     ]
   }
 
-  /** The fixed toolbar: layout first, then the canned requests, then single-item actions. */
+  /** The floating toolbar keeps the essentials; everything else is under More (the context menu). */
   const barGroups: MenuAction[][] = [
-    arrangeActions,
-    quickActions,
-    [
-      ...(single ? [{ key: 'preview', label: 'Open preview', icon: Maximize2, onSelect: () => setPreviewPath(single.path) }] : []),
-      ...downloadActions,
-      resetAction,
-      ...fileActions,
-      deleteAction,
-      clearAction,
-    ],
+    [visionAction, describeAction, ...(previewAction ? [previewAction] : [])],
+    [deleteAction, clearAction],
   ]
 
   const menuTitle = selection.length === 0
@@ -915,7 +966,7 @@ export default function CanvasPage() {
         <SelectionBar
           count={selection.length}
           groups={barGroups}
-          onMore={(r) => setMenu({ target: null, clientX: r.left > 280 ? r.left - 264 : r.right + 8, clientY: r.top })}
+          onMore={(r, toolbar) => setMenu({ target: null, clientX: r.left > 280 ? r.left - 264 : r.right + 8, clientY: r.top, toolbar })}
         />
       )}
 
@@ -995,8 +1046,14 @@ export default function CanvasPage() {
         onClearChips={() => setSelection([])}
         selectMode={selectMode}
         onDoneSelecting={() => setSelectMode(false)}
+        vision={vision && selection.length > 0}
+        onVisionOff={() => setVision(false)}
         inputRef={inputRef}
-        placeholder={selection.length > 0 ? 'What should change in the selection?' : groups.length > 0 ? 'Ask for changes or something new…' : 'Describe what you want designed…'}
+        placeholder={
+          vision && selection.length > 0
+            ? 'Ask about how it looks…'
+            : selection.length > 0 ? 'What should change in the selection?' : groups.length > 0 ? 'Ask for changes or something new…' : 'Describe what you want designed…'
+        }
       />
 
       {menu && (
@@ -1009,35 +1066,94 @@ export default function CanvasPage() {
         />
       )}
 
-      <PreviewModal
+      <PreviewPanel
         id={previewPath ? fileByPath.get(previewPath)?.artifact_id ?? null : null}
-        label={previewPath ? baseOf(previewPath) : ''}
+        label={previewPath ? componentLabel(previewPath) : ''}
         onClose={() => setPreviewPath(null)}
       />
+
+      <MessageModal message={messageRunId ? messageOf(messageRunId) : null} onClose={() => setMessageRunId(null)} />
     </div>
   )
 }
 
-/** Full-size, interactive preview of one component. */
-function PreviewModal({ id, label, onClose }: { id: string | null; label: string; onClose: () => void }) {
-  const { html } = useComponentHtml(id ?? '')
+/** The message (brief) a group / component came from and the chat agent's reply to it. */
+function MessageModal({ message, onClose }: { message: { index: number; brief: string; reply: string } | null; onClose: () => void }) {
   return (
     <Modal
-      open={id != null}
+      open={message != null}
       onClose={onClose}
-      size="xl"
-      title={label}
+      size="lg"
+      title={message ? `Message ${message.index}` : ''}
       footer={
         <Button variant="secondary" onClick={onClose}>
           Close
         </Button>
       }
     >
-      {id && html != null ? (
-        <iframe title={label} srcDoc={html} sandbox="allow-scripts" className="h-[70vh] w-full rounded-lg border border-line bg-white" />
-      ) : (
-        <div className="h-[70vh] w-full animate-pulse rounded-lg bg-app" />
+      {message && (
+        <div className="flex flex-col gap-4">
+          <p className="whitespace-pre-wrap text-ink">{message.brief}</p>
+          {message.reply ? (
+            <div className="rounded-2xl bg-app px-4 py-3 text-sm text-ink-2">
+              <Markdown text={message.reply} />
+            </div>
+          ) : (
+            <p className="text-sm text-ink-3">No reply text from the agent.</p>
+          )}
+        </div>
       )}
     </Modal>
+  )
+}
+
+/** Full-screen, interactive preview of one component: slides in from the right, the big cross
+ *  (top-left) or Escape slides it back. Stays mounted so the last component is kept while sliding out. */
+function PreviewPanel({ id, label, onClose }: { id: string | null; label: string; onClose: () => void }) {
+  const open = id != null
+  const [shown, setShown] = useState<{ id: string; label: string } | null>(null)
+  if (id != null && (shown?.id !== id || shown.label !== label)) setShown({ id, label })
+  const { html } = useComponentHtml(shown?.id ?? '')
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={shown?.label}
+      aria-hidden={!open}
+      inert={!open}
+      className={cx(
+        'fixed inset-0 z-50 flex flex-col bg-surface transition-all duration-300 ease-out',
+        open ? 'visible translate-x-0' : 'invisible translate-x-full',
+      )}
+    >
+      <div className="flex shrink-0 items-center gap-3 border-b border-line px-2 py-2">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close preview"
+          className="flex size-14 items-center justify-center rounded-xl text-ink hover:bg-app focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          <X className="size-9" strokeWidth={2.25} />
+        </button>
+        <span className="truncate text-lg font-medium text-ink">{shown?.label}</span>
+      </div>
+      <div className="min-h-0 flex-1">
+        {shown && html != null ? (
+          <iframe title={shown.label} srcDoc={html} sandbox="allow-scripts" className="size-full border-0 bg-white" />
+        ) : (
+          <div className="size-full animate-pulse bg-app" />
+        )}
+      </div>
+    </div>
   )
 }

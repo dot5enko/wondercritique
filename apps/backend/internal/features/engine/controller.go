@@ -34,6 +34,7 @@ func (c *Controller) Routes(r chi.Router) {
 		r.Use(c.mw.Required)
 		r.Post("/runs", httpx.Handle(c.start))
 		r.Get("/runs", httpx.Handle(c.list))
+		r.Get("/threads", httpx.Handle(c.threads))
 		r.Get("/runs/{id}", httpx.Handle(c.get))
 		r.Get("/runs/{id}/events", httpx.Handle(c.events))
 		r.Post("/runs/{id}/cancel", httpx.Handle(c.cancel))
@@ -59,6 +60,8 @@ type startRequest struct {
 	Input    map[string]json.RawMessage `json:"input" validate:"required"`
 	// ContextPaths are selected canvas files/folders the message is about.
 	ContextPaths []string `json:"context_paths"`
+	// Vision sends rendered previews of the selected components along.
+	Vision bool `json:"vision"`
 }
 
 // start answers 201 `{id, thread_id, status}`; the run executes in the
@@ -77,6 +80,7 @@ func (c *Controller) start(w http.ResponseWriter, r *http.Request) error {
 		IsTest:            req.IsTest,
 		Input:             req.Input,
 		ContextPaths:      req.ContextPaths,
+		Vision:            req.Vision,
 	})
 	if err != nil {
 		return err
@@ -99,6 +103,28 @@ func (c *Controller) list(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nil})
+}
+
+// threads answers `{items, next_offset}` (next_offset null on the last page).
+func (c *Controller) threads(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	p := ThreadParams{Query: q.Get("q")}
+	var err error
+	if p.Limit, err = intParam(q.Get("limit")); err != nil {
+		return apperr.Invalid("invalid limit", map[string]string{"limit": "must be a number"})
+	}
+	if p.Offset, err = intParam(q.Get("offset")); err != nil {
+		return apperr.Invalid("invalid offset", map[string]string{"offset": "must be a number"})
+	}
+	items, more, err := c.engine.ListThreads(r.Context(), viewerOf(r), p)
+	if err != nil {
+		return err
+	}
+	var next any
+	if more {
+		next = max(p.Offset, 0) + len(items)
+	}
+	return httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "next_offset": next})
 }
 
 func intParam(s string) (int, error) {

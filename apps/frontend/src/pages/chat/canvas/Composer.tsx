@@ -1,11 +1,12 @@
 /**
  * Floating message composer of the canvas: the selected components/groups as
- * removable chips (they travel with the message as context), an auto-growing
+ * removable chips (they travel with the message as context), a vision-mode
+ * banner (previews of the selection go along), an auto-growing
  * textarea (16px so iOS doesn't zoom on focus) and Send. Enter sends,
  * Shift+Enter breaks the line.
  */
 import { useLayoutEffect, type RefObject } from 'react'
-import { ArrowUp, X } from 'lucide-react'
+import { ArrowUp, Eye, X } from 'lucide-react'
 import { Button, IconButton, Spinner, cx } from '../../../ui'
 
 export interface ContextChip {
@@ -24,6 +25,8 @@ export function Composer({
   onClearChips,
   selectMode,
   onDoneSelecting,
+  vision,
+  onVisionOff,
   inputRef,
   placeholder,
 }: {
@@ -37,6 +40,9 @@ export function Composer({
   onClearChips: () => void
   selectMode: boolean
   onDoneSelecting: () => void
+  /** Vision mode is on: the message goes with rendered previews of the selection. */
+  vision: boolean
+  onVisionOff: () => void
   inputRef: RefObject<HTMLTextAreaElement | null>
   placeholder: string
 }) {
@@ -56,6 +62,20 @@ export function Composer({
             <Button size="sm" variant="primary" className="rounded-full!" onClick={onDoneSelecting}>
               Done
             </Button>
+          </div>
+        )}
+        {vision && (
+          <div className="flex items-center gap-2 rounded-full bg-accent-soft py-1 pr-1 pl-3 text-xs text-accent-ink">
+            <Eye size={14} className="shrink-0" />
+            <span className="min-w-0 flex-1">Vision mode — the agent sees a rendered preview of the selection.</span>
+            <button
+              type="button"
+              aria-label="Turn vision mode off"
+              onClick={onVisionOff}
+              className="grid size-6 cursor-pointer place-items-center rounded-full outline-none hover:bg-accent/15 focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              <X size={13} />
+            </button>
           </div>
         )}
         {chips.length > 0 && (

@@ -53,6 +53,11 @@ export interface StartRunBody {
    * Requires `thread_id`.
    */
   context_paths?: string[]
+  /**
+   * Vision mode (agent runs): the selected components (≤ 6 files) are rendered
+   * server-side and the screenshots go to the agent with the message.
+   */
+  vision?: boolean
 }
 
 /** POST /runs → 201 `{id, thread_id, status}`; the run executes in the background. */
@@ -90,6 +95,8 @@ export interface RunListItem {
   mode?: RunMode
   /** The chat agent's text answer ("" for pipelines / unfinished runs). */
   reply?: string
+  /** The agent was shown screenshots of the selection (vision mode). */
+  vision?: boolean
 }
 
 export type RunMode = 'pipeline' | 'agent'
@@ -110,6 +117,37 @@ export function listRuns(
   if (params.filter?.thread_id) query['filter[thread_id]'] = params.filter.thread_id
   delete (query as { filter?: unknown }).filter
   return apiGet<{ items: RunListItem[]; next_cursor?: string | null }>(`/runs${toQuery(query)}`, { signal })
+}
+
+/* ---------- threads (chats) ---------- */
+
+/** GET /threads item: one chat = the runs sharing a thread id. */
+export interface ThreadListItem {
+  id: string
+  /** The first message's brief ("" when it has none). */
+  title: string
+  /** Status of the latest run. */
+  status: RunStatus
+  /** First run. */
+  created_at: string
+  /** Latest run — the list order (newest first). */
+  updated_at: string
+  runs: number
+}
+
+export interface ListThreadsParams {
+  limit?: number
+  offset?: number
+  /** Case-insensitive substring of the title. */
+  q?: string
+}
+
+/** GET /threads → `{items, next_offset}` (`null` on the last page). */
+export function listThreads(
+  params: ListThreadsParams = {},
+  signal?: AbortSignal,
+): Promise<{ items: ThreadListItem[]; next_offset: number | null }> {
+  return apiGet<{ items: ThreadListItem[]; next_offset: number | null }>(`/threads${toQuery({ ...params, q: params.q || undefined })}`, { signal })
 }
 
 /* ---------- artifacts ---------- */
@@ -253,6 +291,8 @@ export interface Run {
   agent_id?: string
   /** The chat agent's text answer. */
   reply?: string
+  /** Vision mode: the agent was shown screenshots of the selection. */
+  vision?: boolean
   steps: RunStep[]
   artifacts: Artifact[]
   /** Results in display order: one (the selected artifact) or every component of a multi-component result. */

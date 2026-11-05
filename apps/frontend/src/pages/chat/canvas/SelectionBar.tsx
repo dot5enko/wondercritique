@@ -1,15 +1,17 @@
 /**
- * Floating quick-actions toolbar for the current selection: one icon button
- * per action, sections separated by hairlines, a count badge. Same
- * `MenuAction`s as the context menu.
+ * Floating toolbar for the current selection — the essentials only (the page
+ * passes them: vision mode, describe a change, preview, delete, clear); every
+ * other action lives in the context menu behind More. One icon button per
+ * action, sections separated by hairlines, a count badge. Same `MenuAction`s
+ * as the context menu.
  *
  * Fixed thickness (only the long axis scrolls, scrollbar hidden). The grip
- * moves it anywhere on screen; a button flips it vertical ↔ horizontal. Both
- * are remembered (localStorage, all chats); the default is the top-right
+ * moves it anywhere on screen; More's menu can flip it vertical ↔ horizontal.
+ * Both are remembered (localStorage, all chats); the default is the top-right
  * corner, vertical. The position is clamped into the window on every render.
  */
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { ArrowLeftRight, ArrowUpDown, Ellipsis, GripHorizontal, GripVertical } from 'lucide-react'
+import { Ellipsis, GripHorizontal, GripVertical } from 'lucide-react'
 import { cx } from '../../../ui'
 import type { MenuAction } from './ContextMenu'
 
@@ -18,6 +20,12 @@ interface BarPlace {
   /** Top-left corner in screen px; null = default corner. */
   at: { x: number; y: number } | null
   orientation: Orientation
+}
+
+/** The toolbar's own setting, offered in the menu opened by More. */
+export interface BarControls {
+  vertical: boolean
+  toggle: () => void
 }
 
 const STORAGE_KEY = 'wc-canvas-toolbar'
@@ -40,7 +48,7 @@ export function SelectionBar({ count, groups, onMore }: {
   count: number
   groups: MenuAction[][]
   /** "More actions" — opens the full context menu next to the button. */
-  onMore: (anchor: DOMRect) => void
+  onMore: (anchor: DOMRect, toolbar: BarControls) => void
 }) {
   const [place, setPlace] = useState<BarPlace>(loadPlace)
   const ref = useRef<HTMLDivElement>(null)
@@ -132,18 +140,19 @@ export function SelectionBar({ count, groups, onMore }: {
       {sections.map((items, i) => (
         <div key={i} className={cx('flex shrink-0 items-center gap-0.5', vertical ? 'w-full flex-col' : 'h-full flex-row')}>
           <div role="separator" className={sep} />
-          {items.map(({ key, label, icon: Icon, disabled, onSelect }) => (
+          {items.map(({ key, label, icon: Icon, disabled, active, onSelect }) => (
             <button
               key={key}
               type="button"
               title={label}
               aria-label={label}
+              aria-pressed={active}
               disabled={disabled}
               onClick={(e) => {
                 e.currentTarget.blur()
                 onSelect()
               }}
-              className={cx(BUTTON, disabled && 'pointer-events-none opacity-35')}
+              className={cx(BUTTON, active && 'bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent', disabled && 'pointer-events-none opacity-35')}
             >
               {Icon && <Icon size={17} />}
             </button>
@@ -153,19 +162,13 @@ export function SelectionBar({ count, groups, onMore }: {
       <div role="separator" className={sep} />
       <button
         type="button"
-        title={vertical ? 'Make horizontal' : 'Make vertical'}
-        aria-label={vertical ? 'Make toolbar horizontal' : 'Make toolbar vertical'}
-        onClick={() => setPlace((p) => ({ ...p, orientation: vertical ? 'horizontal' : 'vertical' }))}
-        className={BUTTON}
-      >
-        {vertical ? <ArrowLeftRight size={16} /> : <ArrowUpDown size={16} />}
-      </button>
-      <button
-        type="button"
         title="More actions"
         aria-label="More actions"
         aria-haspopup="menu"
-        onClick={(e) => onMore(e.currentTarget.getBoundingClientRect())}
+        onClick={(e) => onMore(e.currentTarget.getBoundingClientRect(), {
+          vertical,
+          toggle: () => setPlace((p) => ({ ...p, orientation: p.orientation === 'vertical' ? 'horizontal' : 'vertical' })),
+        })}
         className={BUTTON}
       >
         <Ellipsis size={17} />

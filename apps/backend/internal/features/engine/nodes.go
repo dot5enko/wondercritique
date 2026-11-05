@@ -208,12 +208,18 @@ func (nr *nodeRun) execAgent(ctx context.Context) (*nodeResult, error) {
 	sink := &stepSink{nr: nr}
 	ctx = agentrun.WithSink(ctx, sink)
 
+	samples := nr.samples()
+	if nr.st.run.Vision {
+		if err := nr.visionSamples(ctx, samples); err != nil {
+			return &nodeResult{}, err
+		}
+	}
 	req := agentrun.NodeRequest{
 		AgentID:    agentID,
 		Version:    int(numCfg(cfg, "agent_version", 0)),
 		Draft:      nr.st.run.IsTest,
 		ModelSetID: strCfg(cfg, "model_set_id", ""),
-		Samples:    nr.samples(),
+		Samples:    samples,
 		Owner:      nr.st.run.OwnerID,
 		ThreadID:   nr.st.run.ThreadID,
 		Title:      fmt.Sprintf("%s · %s", nr.st.run.PipelineName, nr.st.g.label(nr.node.ID)),

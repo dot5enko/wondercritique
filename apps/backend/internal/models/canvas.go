@@ -53,7 +53,7 @@ func (CanvasState) TableName() string { return "canvas_states" }
 type CanvasLayout struct {
 	Pos   map[string]Point   `json:"pos"`   // "g:<folder>" absolute (free layout) | "c:<file>" offset
 	Scale map[string]float64 `json:"scale"` // file path → uniform scale
-	Dir   map[string]string  `json:"dir"`   // folder path → "row" | "col"
+	Dir   map[string]string  `json:"dir"`   // folder path → "row" | "col" | "pack"
 }
 
 // Point is a canvas position or offset.

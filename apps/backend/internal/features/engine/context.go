@@ -204,6 +204,9 @@ func (e *Engine) buildHistory(ctx context.Context, run *models.Run) string {
 		if len(r.ContextPaths) > 0 {
 			fmt.Fprintf(&b, "(about %s)\n", strings.Join(r.ContextPaths, ", "))
 		}
+		if r.Vision {
+			b.WriteString("(you were shown screenshots of them)\n")
+		}
 		if reply := strings.TrimSpace(r.Reply); reply != "" {
 			fmt.Fprintf(&b, "\nYou: %s\n", truncate(reply, maxHistoryReply))
 		}
